@@ -1,0 +1,16 @@
+#logging:
+#  level:
+#    org.springframework.security: DEBUG
+#    org.springframework.boot: TRACE
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/testdb
+    username: testuser
+    password: testpassword
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database: POSTGRESQL
+    show-sql: true
+
