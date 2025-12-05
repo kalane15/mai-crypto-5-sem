@@ -14,9 +14,7 @@
 
     <modules>
         <module>crypto-library</module>
-        <module>crypto-messenger-client</module>
-        <module>crypto-messenger-protocol</module>
-        <module>crypto-messenger-server</module>
+        <module>crypto-server</module>
     </modules>
 
     <properties>
