@@ -29,6 +29,7 @@ public class AuthController {
     @Operation(summary = "Регистрация пользователя")
     @PostMapping("/sign-up")
     public JwtAuthResponse signUp(@RequestBody @Valid SignUpRequest request) {
+        System.out.println("ABOABBOABA");
         return authenticationService.signUp(request);
     }
 
