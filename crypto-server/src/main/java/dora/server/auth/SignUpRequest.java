@@ -1,5 +1,7 @@
 package dora.server.auth;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -20,4 +22,11 @@ public class SignUpRequest {
     @Schema(description = "Пароль", example = "my_1secret1_password")
     @Size(max = 255, message = "Длина пароля должна быть не более 255 символов")
     private String password;
+
+    @JsonCreator
+    public SignUpRequest(@JsonProperty("username") String username,
+                         @JsonProperty("password") String password) {
+        this.username = username;
+        this.password = password;
+    }
 }

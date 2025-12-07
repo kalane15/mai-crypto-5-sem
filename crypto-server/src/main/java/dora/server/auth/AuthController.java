@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
-
+@RestController
 @RequestMapping("/auth")
 @RequiredArgsConstructor
 @Tag(name = "Аутентификация")
@@ -29,7 +29,6 @@ public class AuthController {
     @Operation(summary = "Регистрация пользователя")
     @PostMapping("/sign-up")
     public JwtAuthResponse signUp(@RequestBody @Valid SignUpRequest request) {
-        System.out.println("ABOABBOABA");
         return authenticationService.signUp(request);
     }
 

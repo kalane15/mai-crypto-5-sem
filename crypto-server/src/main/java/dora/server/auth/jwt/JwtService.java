@@ -112,7 +112,7 @@ public class JwtService {
      * @return данные
      */
     public Claims extractAllClaims(String token) {
-        return Jwts.parserBuilder()  // Используем новый метод parserBuilder()
+        return Jwts.parser() // Используем новый метод parserBuilder()
                 .setSigningKey(getSigningKey())  // Устанавливаем ключ для проверки подписи
                 .build()  // Строим парсер
                 .parseClaimsJws(token)  // Разбираем JWT

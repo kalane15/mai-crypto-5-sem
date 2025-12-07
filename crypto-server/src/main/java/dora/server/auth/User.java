@@ -39,10 +39,6 @@ public class User implements UserDetails {
         return login;
     }
 
-    public Role getRole(){
-        return role;
-    }
-
     public void setRole(Role role){
         this.role = role;
     }
@@ -52,10 +48,6 @@ public class User implements UserDetails {
         this.password = password;
     }
 
-    public String getLogin() {
-        return login;
-    }
-
     public void setLogin(String login) {
         this.login = login;
     }
@@ -63,10 +55,6 @@ public class User implements UserDetails {
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority(role.name()));
-    }
-
-    public String getPassword() {
-        return password;
     }
 
     @Override

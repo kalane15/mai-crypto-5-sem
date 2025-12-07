@@ -4,11 +4,14 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import dora.server.auth.LoginPassword;
 import dora.server.auth.SignInRequest;
 import dora.server.auth.SignUpRequest;
+import dora.server.auth.jwt.JwtAuthResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.web.reactive.server.WebTestClient;;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.reactive.server.WebTestClient;
+import static org.springframework.http.HttpHeaders.AUTHORIZATION;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public class AuthControllerTest {
@@ -22,35 +25,38 @@ public class AuthControllerTest {
         String url = "http://localhost:" + port + "/auth/register";
 
 
-        WebTestClient webTestClient  = WebTestClient.bindToServer()
+        WebTestClient webTestClient = WebTestClient.bindToServer()
                 .baseUrl("http://localhost:" + port).build();
 
-        var tmp = SignUpRequest.builder()
-                .username("makarar")
-                .password("12345678")
-                .build();
+        String jsonBody = "{"
+                + "\"username\": \"makarar\","
+                + "\"password\": \"12345678\""
+                + "}";
 
-        webTestClient.post().uri("/example/hello")
-                .bodyValue(tmp)
+        webTestClient.get().uri("/example/hello")
                 .exchange()
                 .expectStatus().isEqualTo(403);
 
         webTestClient.post().uri("/auth/sign-up")
-                .bodyValue(tmp)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(jsonBody)
                 .exchange()
                 .expectStatus().isOk();
 
-        var tmp2 = SignInRequest.builder()
-                .username("makarar")
-                .password("123456")
-                .build();
-        webTestClient.post().uri("/auth/sign-in")
-                .bodyValue(tmp2)
-                .exchange()
-                .expectStatus().isOk();
 
-        webTestClient.post().uri("/example/hello")
-                .bodyValue(tmp)
+        JwtAuthResponse jwtToken = webTestClient.post().uri("/auth/sign-in")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(jsonBody)
+                .exchange()
+                .expectStatus().isOk()
+                .returnResult(JwtAuthResponse.class)  // Используем POJO для десериализации
+                .getResponseBody()
+                .blockFirst(); // Берем первый элемент из потока (ответ токена)
+
+        // 3. Используем сохраненный JWT для авторизованного запроса
+        assert jwtToken != null;
+        webTestClient.get().uri("/example/hello")
+                .header(AUTHORIZATION, "Bearer " + jwtToken.getToken())  // Добавляем JWT в заголовок
                 .exchange()
                 .expectStatus().isOk();
     }
