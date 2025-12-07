@@ -13,4 +13,6 @@ spring:
       ddl-auto: create-drop
     database: POSTGRESQL
     show-sql: true
-
+token:
+  signing:
+    key: aboba

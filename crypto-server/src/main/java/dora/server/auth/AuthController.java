@@ -1,5 +1,10 @@
 package dora.server.auth;
 
+import dora.server.auth.jwt.JwtAuthResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -14,55 +19,22 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
-@RestController
+
 @RequestMapping("/auth")
+@RequiredArgsConstructor
+@Tag(name = "Аутентификация")
 public class AuthController {
+    private final AuthService authenticationService;
 
-    private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-
-    @Autowired
-    private UserRepository userRepository;
-
-    @PostMapping("/register")
-    public ResponseEntity<String> registerUser(@RequestBody LoginPassword body) {
-        // Проверяем, существует ли пользователь в базе
-        if (userRepository.existsById(body.Login)) {
-            return ResponseEntity.status(409).body("User already exists!");
-        }
-
-        // Хешируем пароль
-        String hashedPassword = passwordEncoder.encode(body.Password);
-
-        // Сохраняем пользователя в базе
-        User user = new User(body.Login, hashedPassword);
-        userRepository.save(user);
-
-        return ResponseEntity.ok("User registered successfully!");
+    @Operation(summary = "Регистрация пользователя")
+    @PostMapping("/sign-up")
+    public JwtAuthResponse signUp(@RequestBody @Valid SignUpRequest request) {
+        return authenticationService.signUp(request);
     }
 
-    @PostMapping("/login")
-    public ResponseEntity<String> loginUser(@RequestBody LoginPassword body) {
-        // Ищем пользователя по логину
-        User user = userRepository.findById(body.Login).orElse(null);
-
-        if (user == null) {
-            return ResponseEntity.status(404).body("User not found!");
-        }
-        List<GrantedAuthority> authorities = List.of( new SimpleGrantedAuthority("ROLE_USER"));
-        // Проверяем пароль
-        if (passwordEncoder.matches(body.Password, user.getPassword())) {
-            Authentication authentication = new UsernamePasswordAuthenticationToken(
-                    user.getLogin(),
-                    null,
-                    authorities
-            );
-
-            // Устанавливаем аутентификацию в SecurityContext
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-
-            return ResponseEntity.ok("Login successful!");
-        } else {
-            return ResponseEntity.status(403).body("Invalid password!");
-        }
+    @Operation(summary = "Авторизация пользователя")
+    @PostMapping("/sign-in")
+    public JwtAuthResponse signIn(@RequestBody @Valid SignInRequest request) {
+        return authenticationService.signIn(request);
     }
 }
