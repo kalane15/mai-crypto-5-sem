@@ -33,6 +33,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
+        // Пропускаем фильтр для эндпоинтов аутентификации
+        String requestPath = request.getRequestURI();
+        if (requestPath != null && requestPath.startsWith("/auth")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // Получаем токен из заголовка
         var authHeader = request.getHeader(HEADER_NAME);
         if (StringUtils.isEmpty(authHeader) || !StringUtils.startsWith(authHeader, BEARER_PREFIX)) {

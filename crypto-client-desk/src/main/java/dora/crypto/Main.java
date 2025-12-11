@@ -1,64 +1,51 @@
 package dora.crypto;
 
+import dora.crypto.api.ApiClient;
+import dora.crypto.ui.AuthView;
+import dora.crypto.ui.MainView;
 import javafx.application.Application;
-import javafx.geometry.Insets;
+import javafx.application.Platform;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.TextArea;
-import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-
 public class Main extends Application {
-
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private Stage primaryStage;
+    private ApiClient apiClient;
+    private AuthView authView;
+    private MainView mainView;
 
     @Override
     public void start(Stage stage) {
+        this.primaryStage = stage;
+        this.apiClient = new ApiClient();
 
-        TextArea output = new TextArea();
-        output.setPrefHeight(300);
+        // Create views
+        authView = new AuthView(apiClient, this::onAuthSuccess);
+        mainView = new MainView(apiClient);
+        
+        // Set up logout handler
+        mainView.addEventHandler(MainView.LOGOUT_EVENT, e -> showAuthView());
 
-        Button sendBtn = new Button("Отправить запрос");
+        // Show initial auth view
+        showAuthView();
 
-        sendBtn.setOnAction(event -> sendRequest(output));
-
-        VBox root = new VBox(10, sendBtn, output);
-        root.setPadding(new Insets(10));
-
-        stage.setTitle("REST Client Example");
-        stage.setScene(new Scene(root, 400, 350));
+        stage.setTitle("Crypto Chat Client");
+        stage.setMinWidth(800);
+        stage.setMinHeight(600);
         stage.show();
     }
 
-    private void sendRequest(TextArea output) {
-        // Укажи URL своего REST сервера
-        String url = "http://localhost:8080/api/hello";
+    private void showAuthView() {
+        Scene scene = new Scene(authView, 600, 500);
+        primaryStage.setScene(scene);
+    }
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .GET()
-                .build();
-
-        // Выполняем запрос в отдельном потоке
-        new Thread(() -> {
-            try {
-                HttpResponse<String> response =
-                        httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-                String text = "Статус: " + response.statusCode() + "\n\n" + response.body();
-
-                // Обновляем UI в JavaFX-потоке:
-                javafx.application.Platform.runLater(() -> output.setText(text));
-
-            } catch (Exception e) {
-                javafx.application.Platform.runLater(() -> output.setText("Ошибка: " + e.getMessage()));
-            }
-        }).start();
+    private void onAuthSuccess(String username) {
+        Platform.runLater(() -> {
+            mainView.setCurrentUser(username);
+            Scene scene = new Scene(mainView, 900, 700);
+            primaryStage.setScene(scene);
+        });
     }
 
     public static void main(String[] args) {

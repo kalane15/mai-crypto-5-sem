@@ -1,0 +1,157 @@
+package dora.crypto.ui;
+
+import dora.crypto.api.ApiClient;
+
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.control.*;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.VBox;
+
+import java.util.function.Consumer;
+
+public class AuthView extends VBox {
+    private final ApiClient apiClient;
+    private final Consumer<String> onAuthSuccess;
+    private TextField usernameField;
+    private PasswordField passwordField;
+    private Label statusLabel;
+
+    public AuthView(ApiClient apiClient, Consumer<String> onAuthSuccess) {
+        this.apiClient = apiClient;
+        this.onAuthSuccess = onAuthSuccess;
+        createView();
+    }
+
+    private void createView() {
+        setSpacing(15);
+        setPadding(new Insets(20));
+        setAlignment(Pos.CENTER);
+
+        Label titleLabel = new Label("Crypto Chat Client");
+        titleLabel.setStyle("-fx-font-size: 24px; -fx-font-weight: bold;");
+
+        TabPane tabPane = new TabPane();
+        
+        Tab signInTab = new Tab("Sign In", createSignInForm());
+        Tab signUpTab = new Tab("Sign Up", createSignUpForm());
+        
+        tabPane.getTabs().addAll(signInTab, signUpTab);
+        tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+
+        statusLabel = new Label();
+        statusLabel.setStyle("-fx-text-fill: red;");
+
+        getChildren().addAll(titleLabel, tabPane, statusLabel);
+    }
+
+    private GridPane createSignInForm() {
+        GridPane grid = new GridPane();
+        grid.setAlignment(Pos.CENTER);
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20));
+
+        Label usernameLabel = new Label("Username:");
+        usernameField = new TextField();
+        usernameField.setPromptText("Enter username");
+
+        Label passwordLabel = new Label("Password:");
+        passwordField = new PasswordField();
+        passwordField.setPromptText("Enter password");
+
+        Button signInButton = new Button("Sign In");
+        signInButton.setOnAction(e -> handleSignIn());
+
+        grid.add(usernameLabel, 0, 0);
+        grid.add(usernameField, 1, 0);
+        grid.add(passwordLabel, 0, 1);
+        grid.add(passwordField, 1, 1);
+        grid.add(signInButton, 1, 2);
+
+        return grid;
+    }
+
+    private GridPane createSignUpForm() {
+        GridPane grid = new GridPane();
+        grid.setAlignment(Pos.CENTER);
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20));
+
+        TextField signUpUsernameField = new TextField();
+        signUpUsernameField.setPromptText("Enter username");
+
+        PasswordField signUpPasswordField = new PasswordField();
+        signUpPasswordField.setPromptText("Enter password");
+
+        Button signUpButton = new Button("Sign Up");
+        signUpButton.setOnAction(e -> handleSignUp(signUpUsernameField.getText(), signUpPasswordField.getText()));
+
+        grid.add(new Label("Username:"), 0, 0);
+        grid.add(signUpUsernameField, 1, 0);
+        grid.add(new Label("Password:"), 0, 1);
+        grid.add(signUpPasswordField, 1, 1);
+        grid.add(signUpButton, 1, 2);
+
+        return grid;
+    }
+
+    private void handleSignIn() {
+        String username = usernameField.getText();
+        String password = passwordField.getText();
+
+        if (username.isEmpty() || password.isEmpty()) {
+            statusLabel.setText("Please fill in all fields");
+            return;
+        }
+
+        statusLabel.setText("Signing in...");
+        statusLabel.setStyle("-fx-text-fill: blue;");
+
+        apiClient.signIn(username, password)
+                .thenAccept(response -> {
+                    javafx.application.Platform.runLater(() -> {
+                        apiClient.setAuthToken(response.getToken());
+                        statusLabel.setText("Sign in successful!");
+                        statusLabel.setStyle("-fx-text-fill: green;");
+                        onAuthSuccess.accept(username);
+                    });
+                })
+                .exceptionally(ex -> {
+                    javafx.application.Platform.runLater(() -> {
+                        statusLabel.setText("Sign in failed: " + ex.getCause().getMessage());
+                        statusLabel.setStyle("-fx-text-fill: red;");
+                    });
+                    return null;
+                });
+    }
+
+    private void handleSignUp(String username, String password) {
+        if (username.isEmpty() || password.isEmpty()) {
+            statusLabel.setText("Please fill in all fields");
+            return;
+        }
+
+        statusLabel.setText("Signing up...");
+        statusLabel.setStyle("-fx-text-fill: blue;");
+
+        apiClient.signUp(username, password)
+                .thenAccept(response -> {
+                    javafx.application.Platform.runLater(() -> {
+                        apiClient.setAuthToken(response.getToken());
+                        statusLabel.setText("Sign up successful!");
+                        statusLabel.setStyle("-fx-text-fill: green;");
+                        onAuthSuccess.accept(username);
+                    });
+                })
+                .exceptionally(ex -> {
+                    javafx.application.Platform.runLater(() -> {
+                        statusLabel.setText("Sign up failed: " + ex.getCause().getMessage());
+                        statusLabel.setStyle("-fx-text-fill: red;");
+                    });
+                    return null;
+                });
+    }
+}
+

@@ -1,10 +1,9 @@
 package dora.server;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+import dora.crypto.shared.dto.AuthResponse;
+import dora.crypto.shared.dto.SignInRequest;
+import dora.crypto.shared.dto.SignUpRequest;
 import dora.server.auth.LoginPassword;
-import dora.server.auth.SignInRequest;
-import dora.server.auth.SignUpRequest;
-import dora.server.auth.jwt.JwtAuthResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -44,12 +43,12 @@ public class AuthControllerTest {
                 .expectStatus().isOk();
 
 
-        JwtAuthResponse jwtToken = webTestClient.post().uri("/auth/sign-in")
+        AuthResponse jwtToken = webTestClient.post().uri("/auth/sign-in")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(jsonBody)
                 .exchange()
                 .expectStatus().isOk()
-                .returnResult(JwtAuthResponse.class)  // Используем POJO для десериализации
+                .returnResult(AuthResponse.class)  // Используем POJO для десериализации
                 .getResponseBody()
                 .blockFirst(); // Берем первый элемент из потока (ответ токена)
 

@@ -1,6 +1,8 @@
 package dora.server.auth;
 
-import dora.server.auth.jwt.JwtAuthResponse;
+import dora.crypto.shared.dto.AuthResponse;
+import dora.crypto.shared.dto.SignInRequest;
+import dora.crypto.shared.dto.SignUpRequest;
 import dora.server.auth.jwt.JwtService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -22,7 +24,7 @@ public class AuthService {
      * @param request данные пользователя
      * @return токен
      */
-    public JwtAuthResponse signUp(SignUpRequest request) {
+    public AuthResponse signUp(SignUpRequest request) {
 
         var user = User.builder()
                 .login(request.getUsername())
@@ -33,7 +35,7 @@ public class AuthService {
         userService.create(user);
 
         var jwt = jwtService.generateToken(user);
-        return new JwtAuthResponse(jwt);
+        return new AuthResponse(jwt);
     }
 
     /**
@@ -42,7 +44,7 @@ public class AuthService {
      * @param request данные пользователя
      * @return токен
      */
-    public JwtAuthResponse signIn(SignInRequest request) {
+    public AuthResponse signIn(SignInRequest request) {
         authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
                 request.getUsername(),
                 request.getPassword()
@@ -53,6 +55,6 @@ public class AuthService {
                 .loadUserByUsername(request.getUsername());
 
         var jwt = jwtService.generateToken(user);
-        return new JwtAuthResponse(jwt);
+        return new AuthResponse(jwt);
     }
 }
