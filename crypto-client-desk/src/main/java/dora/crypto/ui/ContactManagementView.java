@@ -19,7 +19,7 @@ public class ContactManagementView extends VBox {
     public ContactManagementView(ApiClient apiClient) {
         this.apiClient = apiClient;
         createView();
-        loadContacts();
+        // Don't load contacts in constructor - wait until after authentication
     }
 
     private void createView() {

@@ -43,8 +43,10 @@ public class ApiClient {
                 .uri(URI.create(BASE_URL + endpoint))
                 .timeout(Duration.ofSeconds(30));
 
-        if (authToken != null) {
+        if (authToken != null && !authToken.isEmpty()) {
             builder.header("Authorization", "Bearer " + authToken);
+        } else {
+            System.err.println("WARNING: No auth token available for request to " + endpoint);
         }
 
         return builder;

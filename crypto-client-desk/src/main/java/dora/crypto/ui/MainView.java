@@ -51,6 +51,21 @@ public class MainView extends BorderPane {
         if (welcomeLabel != null) {
             welcomeLabel.setText("Welcome, " + username + "!");
         }
+        // Load data after authentication succeeds
+        loadInitialData();
+    }
+
+    private void loadInitialData() {
+        // Load data for all tabs
+        for (Tab tab : tabPane.getTabs()) {
+            if (tab.getContent() instanceof ContactManagementView) {
+                ((ContactManagementView) tab.getContent()).loadContacts();
+            } else if (tab.getContent() instanceof ChatManagementView) {
+                ChatManagementView chatView = (ChatManagementView) tab.getContent();
+                chatView.loadChats();
+                chatView.loadContacts();
+            }
+        }
     }
 
     private void handleLogout() {

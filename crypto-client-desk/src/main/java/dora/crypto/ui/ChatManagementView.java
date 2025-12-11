@@ -24,8 +24,7 @@ public class ChatManagementView extends VBox {
     public ChatManagementView(ApiClient apiClient) {
         this.apiClient = apiClient;
         createView();
-        loadChats();
-        loadContacts();
+        // Don't load data in constructor - wait until after authentication
     }
 
     private void createView() {
@@ -47,8 +46,7 @@ public class ChatManagementView extends VBox {
         HBox actionBox = new HBox(10);
         Button refreshButton = new Button("Refresh");
         refreshButton.setOnAction(e -> {
-            loadChats();
-            loadContacts();
+            updateFull();
         });
         actionBox.getChildren().add(refreshButton);
 
@@ -56,6 +54,12 @@ public class ChatManagementView extends VBox {
         statusLabel.setStyle("-fx-text-fill: red;");
 
         getChildren().addAll(titleLabel, createChatBox, chatListView, actionBox, statusLabel);
+        updateFull();
+    }
+
+    private void updateFull(){
+        loadChats();
+        loadContacts();
     }
 
     private VBox createCreateChatSection() {
@@ -106,7 +110,7 @@ public class ChatManagementView extends VBox {
         return box;
     }
 
-    private void loadContacts() {
+    public void loadContacts() {
         apiClient.getContacts()
                 .thenAccept(contacts -> {
                     Platform.runLater(() -> {

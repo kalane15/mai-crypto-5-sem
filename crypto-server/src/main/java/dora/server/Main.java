@@ -8,8 +8,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 @SpringBootApplication
-@EnableJpaRepositories
-@EntityScan("dora.server.auth")
+@EnableJpaRepositories(basePackages = "dora.server")
+@EntityScan(basePackages = "dora.server")
 public class Main {
 
     public static void main(String[] args) {
