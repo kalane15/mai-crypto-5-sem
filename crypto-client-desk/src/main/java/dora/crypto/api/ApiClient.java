@@ -18,7 +18,8 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public class ApiClient {
-    private static final String BASE_URL = "http://localhost:8080";
+    public static final String BASE_URL = "http://localhost:8080";
+    public static final String BASE_URL_NO_PROTOCOL = "//localhost:8080";
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private String authToken;

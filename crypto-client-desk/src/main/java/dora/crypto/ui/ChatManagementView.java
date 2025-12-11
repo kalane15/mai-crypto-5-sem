@@ -1,5 +1,6 @@
 package dora.crypto.ui;
 
+import dora.crypto.Main;
 import dora.crypto.api.ApiClient;
 import dora.crypto.shared.dto.Chat;
 import dora.crypto.shared.dto.Contact;
@@ -20,9 +21,11 @@ public class ChatManagementView extends VBox {
     private ComboBox<String> modeComboBox;
     private ComboBox<String> paddingComboBox;
     private Label statusLabel;
+    private static Main app;
 
-    public ChatManagementView(ApiClient apiClient) {
+    public ChatManagementView(ApiClient apiClient, Main app) {
         this.apiClient = apiClient;
+        ChatManagementView.app = app;
         createView();
         // Don't load data in constructor - wait until after authentication
     }
@@ -241,16 +244,10 @@ public class ChatManagementView extends VBox {
         }
 
         private void handleConnect(Chat chat) {
-            apiClient.connectToChat(chat.getId())
-                    .thenRun(() -> Platform.runLater(() -> parentView.loadChats()))
-                    .exceptionally(ex -> {
-                        Platform.runLater(() -> {
-                            Alert alert = new Alert(Alert.AlertType.ERROR);
-                            alert.setContentText("Failed to connect to chat: " + ex.getCause().getMessage());
-                            alert.show();
-                        });
-                        return null;
-                    });
+
+            app.manageConnectToChat(chat);
+
+            parentView.loadChats();
         }
 
         private void handleDisconnect(Chat chat) {

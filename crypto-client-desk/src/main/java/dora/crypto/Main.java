@@ -1,6 +1,7 @@
 package dora.crypto;
 
 import dora.crypto.api.ApiClient;
+import dora.crypto.shared.dto.Chat;
 import dora.crypto.ui.AuthView;
 import dora.crypto.ui.MainView;
 import javafx.application.Application;
@@ -8,11 +9,17 @@ import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+
+
 public class Main extends Application {
     private Stage primaryStage;
     private ApiClient apiClient;
     private AuthView authView;
     private MainView mainView;
+    public ChatWebSocketClient socket;
+
 
     @Override
     public void start(Stage stage) {
@@ -21,8 +28,8 @@ public class Main extends Application {
 
         // Create views
         authView = new AuthView(apiClient, this::onAuthSuccess);
-        mainView = new MainView(apiClient);
-        
+        mainView = new MainView(apiClient, this);
+
         // Set up logout handler
         mainView.addEventHandler(MainView.LOGOUT_EVENT, e -> showAuthView());
 
@@ -46,6 +53,12 @@ public class Main extends Application {
             Scene scene = new Scene(mainView, 900, 700);
             primaryStage.setScene(scene);
         });
+    }
+
+    public boolean manageConnectToChat(Chat chat) {
+        socket = new ChatWebSocketClient("ws:" + ApiClient.BASE_URL_NO_PROTOCOL, chat);
+        socket.start();
+        return true;
     }
 
     public static void main(String[] args) {

@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 
 @RestController
 @RequestMapping("/chats")
@@ -34,6 +35,16 @@ public class ChatController {
     public ResponseEntity<List<Chat>> getChats() {
         List<Chat> chats = chatService.getChats();
         return ResponseEntity.ok(chats);
+    }
+
+    @Operation(summary = "Connect to a chat")
+    @GetMapping("/{chatId}/get")
+    public ResponseEntity<Chat> getChat(@PathVariable("chatId") Long chatId) {
+        try {
+            return ResponseEntity.ok(chatService.getChat(chatId));
+        } catch (IllegalArgumentException | NoSuchElementException e) {
+            return ResponseEntity.badRequest().build();
+        }
     }
 
     @Operation(summary = "Connect to a chat")

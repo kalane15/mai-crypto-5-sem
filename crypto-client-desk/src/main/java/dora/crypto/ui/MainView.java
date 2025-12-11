@@ -1,5 +1,6 @@
 package dora.crypto.ui;
 
+import dora.crypto.Main;
 import dora.crypto.api.ApiClient;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
@@ -12,9 +13,11 @@ public class MainView extends BorderPane {
     private String currentUsername;
     private TabPane tabPane;
     private Label welcomeLabel;
+    private Main app;
 
-    public MainView(ApiClient apiClient) {
+    public MainView(ApiClient apiClient, Main app) {
         this.apiClient = apiClient;
+        this.app = app;
         createView();
     }
 
@@ -36,7 +39,7 @@ public class MainView extends BorderPane {
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
         Tab contactsTab = new Tab("Contacts", new ContactManagementView(apiClient));
-        Tab chatsTab = new Tab("Secret Chats", new ChatManagementView(apiClient));
+        Tab chatsTab = new Tab("Secret Chats", new ChatManagementView(apiClient, app));
 
         tabPane.getTabs().addAll(contactsTab, chatsTab);
 

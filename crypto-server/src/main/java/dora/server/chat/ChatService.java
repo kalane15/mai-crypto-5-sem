@@ -76,6 +76,11 @@ public class ChatService {
                 .collect(Collectors.toList());
     }
 
+    public Chat getChat(Long id) {
+        var res = chatRepository.findById(id);
+        return toDto(res.orElseThrow());
+    }
+
     @Transactional
     public void connectToChat(Long chatId) {
         User currentUser = userService.getCurrentUser();
@@ -118,6 +123,19 @@ public class ChatService {
         return Chat.builder()
                 .id(chat.getId())
                 .contactUsername(otherUser.getUsername())
+                .algorithm(chat.getAlgorithm())
+                .mode(chat.getMode())
+                .padding(chat.getPadding())
+                .status(chat.getStatus().name())
+                .g(chat.getG())
+                .p(chat.getP())
+                .build();
+    }
+
+    private Chat toDto(dora.server.chat.Chat chat) {
+        return Chat.builder()
+                .id(chat.getId())
+                .contactUsername(chat.getUser1().getUsername())
                 .algorithm(chat.getAlgorithm())
                 .mode(chat.getMode())
                 .padding(chat.getPadding())

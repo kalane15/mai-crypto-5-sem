@@ -8,6 +8,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+
 @Entity
 @Table(name = "chat")
 @Data
@@ -15,6 +18,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Chat {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -44,10 +48,28 @@ public class Chat {
     @Column(nullable = false)
     private ChatStatus status;
 
+    @Column(precision = 400, scale = 0)
+    private BigInteger p;
+
+    @Column(nullable = false)
+    private BigInteger g;
+
     public enum ChatStatus {
         CREATED,
         CONNECTED,
         DISCONNECTED
+    }
+
+    @PrePersist
+    private void prePersist() {
+        if (this.p == null) {
+            // случайное число порядка 10^300
+            String big = "1" + "0".repeat(300);
+            BigInteger base = new BigInteger(big);
+            BigInteger randomPart = BigInteger.valueOf((long) (Math.random() * 1000));
+            this.p = base.add(randomPart);
+        }
+        this.g = BigInteger.valueOf((int) (Math.random() * 10) + 2);
     }
 }
 

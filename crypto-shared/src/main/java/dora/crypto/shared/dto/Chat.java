@@ -8,6 +8,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -37,5 +40,11 @@ public class Chat {
     @Schema(description = "Chat status", example = "CONNECTED", allowableValues = {"CREATED", "CONNECTED", "DISCONNECTED"})
     @JsonProperty("status")
     private String status; // CREATED, CONNECTED, DISCONNECTED
+
+    @JsonProperty("p")
+    private BigInteger p;
+
+    @JsonProperty("g")
+    private BigInteger g;
 }
 
