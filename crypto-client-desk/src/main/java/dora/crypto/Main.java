@@ -3,14 +3,12 @@ package dora.crypto;
 import dora.crypto.api.ApiClient;
 import dora.crypto.shared.dto.Chat;
 import dora.crypto.ui.AuthView;
+import dora.crypto.ui.ChatView;
 import dora.crypto.ui.MainView;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
-
-import java.net.URI;
-import java.net.URISyntaxException;
 
 
 public class Main extends Application {
@@ -18,8 +16,10 @@ public class Main extends Application {
     private ApiClient apiClient;
     private AuthView authView;
     private MainView mainView;
+    private ChatView currentChatView;
+    private Scene mainViewScene;
     public ChatWebSocketClient socket;
-
+    public String UserName = "";
 
     @Override
     public void start(Stage stage) {
@@ -27,7 +27,7 @@ public class Main extends Application {
         this.apiClient = new ApiClient();
 
         // Create views
-        authView = new AuthView(apiClient, this::onAuthSuccess);
+        authView = new AuthView(apiClient, this::onAuthSuccess, this);
         mainView = new MainView(apiClient, this);
 
         // Set up logout handler
@@ -50,15 +50,41 @@ public class Main extends Application {
     private void onAuthSuccess(String username) {
         Platform.runLater(() -> {
             mainView.setCurrentUser(username);
-            Scene scene = new Scene(mainView, 900, 700);
-            primaryStage.setScene(scene);
+            mainViewScene = new Scene(mainView, 900, 700);
+            primaryStage.setScene(mainViewScene);
         });
     }
 
     public boolean manageConnectToChat(Chat chat) {
-        socket = new ChatWebSocketClient("ws:" + ApiClient.BASE_URL_NO_PROTOCOL, chat);
-        socket.start();
+        socket = new ChatWebSocketClient("ws:" + ApiClient.BASE_URL_NO_PROTOCOL, chat, UserName);
+        var future = socket.start();
+        future.thenRun(() -> apiClient.connectToChat(chat.getId()));
         return true;
+    }
+
+    public void showChatView(Chat chat) {
+        Platform.runLater(() -> {
+            currentChatView = new ChatView(apiClient, chat, this);
+            Scene scene = new Scene(currentChatView, 900, 700);
+            primaryStage.setScene(scene);
+        });
+    }
+
+    public void showMainView() {
+        Platform.runLater(() -> {
+            currentChatView = null;
+            // Reuse the existing mainViewScene instead of creating a new one
+            if (mainViewScene != null) {
+                primaryStage.setScene(mainViewScene);
+            } else {
+                // Fallback: create scene if it doesn't exist (shouldn't happen normally)
+                mainViewScene = new Scene(mainView, 900, 700);
+                primaryStage.setScene(mainViewScene);
+            }
+            if (mainView != null) {
+                mainView.refreshChats();
+            }
+        });
     }
 
     public static void main(String[] args) {

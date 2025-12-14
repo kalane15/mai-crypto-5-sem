@@ -1,11 +1,15 @@
 package dora.server.chat;
 
+import dora.crypto.shared.dto.ChatMessage;
+import dora.crypto.shared.dto.ChatKeyPart;
 import dora.crypto.shared.dto.ChatRequest;
 import dora.crypto.shared.dto.Chat;
 import dora.server.auth.User;
 import dora.server.auth.UserService;
 import dora.server.contact.ContactRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +20,10 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ChatService {
+    @Autowired
+    private SimpMessagingTemplate messagingTemplate;
+
+
     private final ChatRepository chatRepository;
     private final ContactRepository contactRepository;
     private final UserService userService;
@@ -26,7 +34,7 @@ public class ChatService {
                 .orElseThrow(() -> new IllegalArgumentException("Contact not found"));
 
         if (!contact.getUser().getUsername().equals(currentUser.getUsername()) &&
-            !contact.getContactUser().getUsername().equals(currentUser.getUsername())) {
+                !contact.getContactUser().getUsername().equals(currentUser.getUsername())) {
             throw new IllegalArgumentException("You can only create chats with your contacts");
         }
 
@@ -88,16 +96,81 @@ public class ChatService {
                 .orElseThrow(() -> new IllegalArgumentException("Chat not found"));
 
         if (!chat.getUser1().getUsername().equals(currentUser.getUsername()) &&
-            !chat.getUser2().getUsername().equals(currentUser.getUsername())) {
+                !chat.getUser2().getUsername().equals(currentUser.getUsername())) {
             throw new IllegalArgumentException("You can only connect to your own chats");
         }
 
-        if (chat.getStatus() == dora.server.chat.Chat.ChatStatus.CONNECTED) {
-            throw new IllegalArgumentException("Chat is already connected");
+        // Check if already connected
+        boolean alreadyConnected = (chat.getUser1().getUsername().equals(currentUser.getUsername()) && chat.isConnectedUser1()) ||
+                                   (chat.getUser2().getUsername().equals(currentUser.getUsername()) && chat.isConnectedUser2());
+        
+        if (alreadyConnected) {
+            throw new IllegalArgumentException("Dont connect twice to one chat");
         }
 
-        chat.setStatus(dora.server.chat.Chat.ChatStatus.CONNECTED);
+        // Mark the current user as connected
+        if (chat.getUser1().getUsername().equals(currentUser.getUsername())) {
+            chat.setConnectedUser1(true);
+        } else {
+            chat.setConnectedUser2(true);
+        }
+
+        var oldStatus = chat.getStatus();
+        var newStatus = chat.getStatus().next(1);
+        chat.setStatus(newStatus);
+        
+        System.out.println("Chat " + chat.getId() + " status: " + oldStatus.name() + " -> " + newStatus.name() + 
+                          " (user1 connected: " + chat.isConnectedUser1() + 
+                          ", user2 connected: " + chat.isConnectedUser2() + ")");
+
         chatRepository.save(chat);
+
+        // Determine the other user
+        User otherUser = chat.getUser1().getUsername().equals(currentUser.getUsername())
+                ? chat.getUser2()
+                : chat.getUser1();
+
+        // If status becomes CONNECTED2, send messages to both users
+        if (newStatus == dora.server.chat.Chat.ChatStatus.CONNECTED2) {
+            System.out.println("Chat reached CONNECTED2, sending 'ready for key exchange' messages to both users");
+            // Send message to the other user
+            var messageToOther = ChatMessage.builder()
+                    .receiver(otherUser.getUsername())
+                    .sender(currentUser.getUsername())
+                    .message("ready for key exchange")
+                    .build();
+            sendMessage(chat.getId(), messageToOther);
+            
+            // Also send message to current user (they should receive it when subscribed)
+            var messageToCurrent = ChatMessage.builder()
+                    .receiver(currentUser.getUsername())
+                    .sender(otherUser.getUsername())
+                    .message("ready for key exchange")
+                    .build();
+            sendMessage(chat.getId(), messageToCurrent);
+        } else if (oldStatus == dora.server.chat.Chat.ChatStatus.CONNECTED2) {
+            // If status was already CONNECTED2, send message to the newly connecting user
+            // This handles the case where one user connects after the status is already CONNECTED2
+            System.out.println("Chat already CONNECTED2, sending 'ready for key exchange' to newly connected user: " + currentUser.getUsername());
+            var message = ChatMessage.builder()
+                    .receiver(currentUser.getUsername())
+                    .sender(otherUser.getUsername())
+                    .message("ready for key exchange")
+                    .build();
+            sendMessage(chat.getId(), message);
+        }
+    }
+
+    public void sendMessage(Long chatId, ChatMessage message) {
+        String topic = "/topic/messages/" + chatId + "/" + message.getReceiver();
+        System.out.println("Sending ChatMessage to topic: " + topic + ", Message: " + message);
+        messagingTemplate.convertAndSend(topic, message);
+    }
+
+    public void sendKeyPart(Long chatId, ChatKeyPart keyPart) {
+        String topic = "/topic/messages/" + chatId + "/" + keyPart.getReceiver();
+        System.out.println("Sending ChatKeyPart to topic: " + topic + ", Sender: " + keyPart.getSender() + ", Receiver: " + keyPart.getReceiver());
+        messagingTemplate.convertAndSend(topic, keyPart);
     }
 
     @Transactional
@@ -107,15 +180,17 @@ public class ChatService {
                 .orElseThrow(() -> new IllegalArgumentException("Chat not found"));
 
         if (!chat.getUser1().getUsername().equals(currentUser.getUsername()) &&
-            !chat.getUser2().getUsername().equals(currentUser.getUsername())) {
+                !chat.getUser2().getUsername().equals(currentUser.getUsername())) {
             throw new IllegalArgumentException("You can only disconnect from your own chats");
         }
 
-        if (chat.getStatus() != dora.server.chat.Chat.ChatStatus.CONNECTED) {
+        if (chat.getUser1() != currentUser
+                && chat.getUser2() != currentUser) {
             throw new IllegalArgumentException("Chat is not connected");
         }
 
-        chat.setStatus(dora.server.chat.Chat.ChatStatus.DISCONNECTED);
+        var newStatus = chat.getStatus().next(-1);
+        chat.setStatus(newStatus);
         chatRepository.save(chat);
     }
 

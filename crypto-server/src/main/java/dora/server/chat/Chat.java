@@ -54,10 +54,24 @@ public class Chat {
     @Column(nullable = false)
     private BigInteger g;
 
+    @Column(nullable = false)
+    private boolean connectedUser1 = false;
+
+    @Column(nullable = false)
+    private boolean connectedUser2 = false;
+
+
     public enum ChatStatus {
         CREATED,
-        CONNECTED,
-        DISCONNECTED
+        CONNECTED1,
+        CONNECTED2,
+        DISCONNECTED;
+
+        public ChatStatus next(int increment) {
+            // Получаем индекс текущего значения в перечислении
+            int nextIndex = (this.ordinal() + increment) % values().length; // Мод для циклического перехода
+            return values()[nextIndex];
+        }
     }
 
     @PrePersist

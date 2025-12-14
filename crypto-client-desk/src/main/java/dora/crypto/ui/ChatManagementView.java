@@ -244,10 +244,12 @@ public class ChatManagementView extends VBox {
         }
 
         private void handleConnect(Chat chat) {
-
-            app.manageConnectToChat(chat);
-
+            var ok = app.manageConnectToChat(chat);
             parentView.loadChats();
+
+            if (ok) {
+                app.showChatView(chat);
+            }
         }
 
         private void handleDisconnect(Chat chat) {

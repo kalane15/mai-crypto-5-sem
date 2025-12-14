@@ -71,6 +71,16 @@ public class MainView extends BorderPane {
         }
     }
 
+    public void refreshChats() {
+        // Refresh data for all tabs
+        for (Tab tab : tabPane.getTabs()) {
+            if (tab.getContent() instanceof ChatManagementView) {
+                ChatManagementView chatView = (ChatManagementView) tab.getContent();
+                chatView.loadChats();
+            }
+        }
+    }
+
     private void handleLogout() {
         apiClient.clearAuthToken();
         // This will be handled by the main application to switch back to auth view

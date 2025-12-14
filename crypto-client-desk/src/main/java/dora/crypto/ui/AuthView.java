@@ -1,5 +1,6 @@
 package dora.crypto.ui;
 
+import dora.crypto.Main;
 import dora.crypto.api.ApiClient;
 
 import javafx.geometry.Insets;
@@ -16,11 +17,13 @@ public class AuthView extends VBox {
     private TextField usernameField;
     private PasswordField passwordField;
     private Label statusLabel;
+    private final Main app;
 
-    public AuthView(ApiClient apiClient, Consumer<String> onAuthSuccess) {
+    public AuthView(ApiClient apiClient, Consumer<String> onAuthSuccess, Main app) {
         this.apiClient = apiClient;
         this.onAuthSuccess = onAuthSuccess;
         createView();
+        this.app = app;
     }
 
     private void createView() {
@@ -115,6 +118,7 @@ public class AuthView extends VBox {
                         apiClient.setAuthToken(response.getToken());
                         statusLabel.setText("Sign in successful!");
                         statusLabel.setStyle("-fx-text-fill: green;");
+                        app.UserName = username;
                         onAuthSuccess.accept(username);
                     });
                 })
@@ -141,6 +145,7 @@ public class AuthView extends VBox {
                     javafx.application.Platform.runLater(() -> {
                         apiClient.setAuthToken(response.getToken());
                         statusLabel.setText("Sign up successful!");
+                        app.UserName = username;
                         statusLabel.setStyle("-fx-text-fill: green;");
                         onAuthSuccess.accept(username);
                     });
