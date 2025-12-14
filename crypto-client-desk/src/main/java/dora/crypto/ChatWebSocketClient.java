@@ -13,6 +13,7 @@ import java.lang.reflect.Type;
 import java.math.BigInteger;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 public class ChatWebSocketClient {
 
@@ -24,6 +25,7 @@ public class ChatWebSocketClient {
     private StompSessionHandler sessionHandler;
     private String username;
     private BigInteger a = BigInteger.valueOf(2);
+    private Consumer<ChatMessage> onMessageReceived;
 
     public ChatWebSocketClient(String url, Chat chat, String username) {
         this.url = url + "/chat";
@@ -31,6 +33,37 @@ public class ChatWebSocketClient {
         this.objectMapper = new ObjectMapper();
         this.chat = chat;
         this.username = username;
+    }
+
+    public void setOnMessageReceived(Consumer<ChatMessage> callback) {
+        this.onMessageReceived = callback;
+    }
+
+    public void sendMessage(String messageText) {
+        if (sessionHandler != null && sessionHandler instanceof ChatStompSessionHandler) {
+            ChatStompSessionHandler handler = (ChatStompSessionHandler) sessionHandler;
+            if (handler.session != null && handler.session.isConnected()) {
+                var message = ChatMessage.builder()
+                        .sender(username)
+                        .receiver(chat.getContactUsername())
+                        .message(messageText)
+                        .build();
+                handler.sendChatMessage(message);
+                System.out.println("[" + username + "] Sending message: " + messageText);
+            } else {
+                System.err.println("[" + username + "] Cannot send message - session not connected");
+            }
+        } else {
+            System.err.println("[" + username + "] Cannot send message - handler not initialized");
+        }
+    }
+
+    public boolean isConnected() {
+        if (sessionHandler != null && sessionHandler instanceof ChatStompSessionHandler) {
+            ChatStompSessionHandler handler = (ChatStompSessionHandler) sessionHandler;
+            return handler.session != null && handler.session.isConnected();
+        }
+        return false;
     }
 
     public CompletableFuture<Void> start() {
@@ -55,7 +88,7 @@ public class ChatWebSocketClient {
     // Статический обработчик сессий
     class ChatStompSessionHandler extends StompSessionHandlerAdapter {
 
-        private StompSession session;
+        StompSession session;
 
         @Override
         public void afterConnected(StompSession session, StompHeaders connectedHeaders) {
@@ -197,6 +230,11 @@ public class ChatWebSocketClient {
                     if (Objects.equals(chatMessage.getMessage(), "ready for key exchange")) {
                         System.out.println("[" + username + "] Received 'ready for key exchange', sending key part...");
                         parentHandler.sendKeyPart();
+                    } else {
+                        // Regular chat message - notify callback
+                        if (onMessageReceived != null) {
+                            onMessageReceived.accept(chatMessage);
+                        }
                     }
                 } else {
                     System.out.println("[" + username + "] Ignoring message from unexpected sender: " + chatMessage.getSender() + 

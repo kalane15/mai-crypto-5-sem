@@ -3,6 +3,8 @@ package dora.crypto.ui;
 import dora.crypto.Main;
 import dora.crypto.api.ApiClient;
 import dora.crypto.shared.dto.Chat;
+import dora.crypto.shared.dto.ChatMessage;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
@@ -24,6 +26,40 @@ public class ChatView extends BorderPane {
         this.chat = chat;
         this.app = app;
         createView();
+        setupWebSocket();
+    }
+
+    private void setupWebSocket() {
+        // Set up message callback when WebSocket client is available
+        if (app.socket != null) {
+            app.socket.setOnMessageReceived(this::onMessageReceived);
+            // Clear the placeholder message once connected
+            Platform.runLater(() -> {
+                messageArea.clear();
+                if (app.socket.isConnected()) {
+                    messageArea.appendText("Chat connected. You can now send messages.\n");
+                } else {
+                    messageArea.appendText("Connecting to chat...\n");
+                }
+            });
+        } else {
+            // If socket is not available yet, wait a bit and try again
+            Platform.runLater(() -> {
+                javafx.animation.PauseTransition pause = new javafx.animation.PauseTransition(javafx.util.Duration.millis(500));
+                pause.setOnFinished(e -> setupWebSocket());
+                pause.play();
+            });
+        }
+    }
+
+    private void onMessageReceived(ChatMessage message) {
+        Platform.runLater(() -> {
+            // Display received message
+            String displayText = message.getSender() + ": " + message.getMessage() + "\n";
+            messageArea.appendText(displayText);
+            // Auto-scroll to bottom
+            messageArea.setScrollTop(Double.MAX_VALUE);
+        });
     }
 
     private void createView() {
@@ -85,9 +121,21 @@ public class ChatView extends BorderPane {
             return;
         }
 
-        // TODO: Implement actual message sending
-        messageArea.appendText("You: " + message + "\n");
-        messageInput.clear();
+        // Send message via WebSocket
+        if (app.socket != null && app.socket.isConnected()) {
+            // Display sent message immediately
+            messageArea.appendText("You: " + message + "\n");
+            messageArea.setScrollTop(Double.MAX_VALUE);
+            
+            // Send via WebSocket
+            app.socket.sendMessage(message);
+            messageInput.clear();
+        } else {
+            // Show error if not connected
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setContentText("Not connected to chat. Please wait for connection...");
+            alert.show();
+        }
     }
 
     private void handleDisconnect() {
