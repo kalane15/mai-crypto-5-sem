@@ -11,6 +11,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
 import java.lang.reflect.Type;
 import java.math.BigInteger;
+import java.security.SecureRandom;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -20,19 +21,87 @@ public class ChatWebSocketClient {
     private final BigInteger constant;
     private byte[] key;
     private final ObjectMapper objectMapper;
+
+    public byte[] getKey() {
+        return key;
+    }
     private final Chat chat;
     private final String url;
     private StompSessionHandler sessionHandler;
     private String username;
-    private BigInteger a = BigInteger.valueOf(2);
+    private final BigInteger a;
     private Consumer<ChatMessage> onMessageReceived;
 
     public ChatWebSocketClient(String url, Chat chat, String username) {
         this.url = url + "/chat";
-        this.constant = chat.getG().modPow(a, chat.getP());
-        this.objectMapper = new ObjectMapper();
         this.chat = chat;
         this.username = username;
+        this.objectMapper = new ObjectMapper();
+        
+        // Choose 'a' based on the required key length for the algorithm
+        this.a = generatePrivateExponent(chat.getAlgorithm(), chat.getP());
+        this.constant = chat.getG().modPow(a, chat.getP());
+    }
+
+    /**
+     * Generates a private exponent 'a' for Diffie-Hellman key exchange.
+     * Since the final key is g^(a*b) mod p, we don't need 'a' to be as large
+     * as the final key length. We use a smaller exponent for efficiency while
+     * maintaining security.
+     * 
+     * @param algorithm The encryption algorithm (DES, DEAL, RC5, RIJNDAEL)
+     * @param p The prime modulus
+     * @return A random BigInteger 'a' suitable for the key length
+     */
+    private BigInteger generatePrivateExponent(String algorithm, BigInteger p) {
+        // Determine required key length in bits based on algorithm
+        int keyLengthBits = getRequiredKeyLengthBits(algorithm);
+        
+        // For the exponent 'a', we use a smaller size than the final key length
+        // This is because g^(a*b) mod p will be large enough even with smaller exponents
+        // Using keyLengthBits/2 provides good security while keeping exponents reasonable
+        int exponentBits = Math.max(128, keyLengthBits / 2); // At least 128 bits for security
+        
+        SecureRandom random = new SecureRandom();
+        BigInteger pMinusOne = p.subtract(BigInteger.ONE);
+        
+        // Generate a random number 'a' with exponentBits bits
+        BigInteger a = new BigInteger(exponentBits, random);
+        
+        // Ensure a is at least 1 (should always be true for positive bit length)
+        if (a.compareTo(BigInteger.ONE) < 0) {
+            a = BigInteger.ONE;
+        }
+        
+        // If by chance a >= p-1 (very unlikely given p is huge), reduce it
+        if (a.compareTo(pMinusOne) >= 0) {
+            a = a.mod(pMinusOne);
+            if (a.compareTo(BigInteger.ONE) < 0) {
+                a = BigInteger.ONE;
+            }
+        }
+        
+        return a;
+    }
+
+    /**
+     * Returns the required key length in bits for the given algorithm.
+     */
+    private int getRequiredKeyLengthBits(String algorithm) {
+        return switch (algorithm.toUpperCase()) {
+            case "DES" -> 64;  // DES uses 64-bit keys (8 bytes)
+            case "DEAL" -> 256; // DEAL supports up to 256-bit keys, use maximum for security
+            case "RC5" -> 256;  // RC5 supports variable keys, use 256 for security
+            case "RIJNDAEL" -> 256; // RIJNDAEL supports up to 256-bit keys, use maximum
+            default -> 256; // Default to 256 bits for unknown algorithms
+        };
+    }
+
+    /**
+     * Returns the required key length in bytes for the given algorithm.
+     */
+    private int getRequiredKeyLengthBytes(String algorithm) {
+        return getRequiredKeyLengthBits(algorithm) / 8;
     }
 
     public void setOnMessageReceived(Consumer<ChatMessage> callback) {
@@ -208,8 +277,33 @@ public class ChatWebSocketClient {
                 if (key == null) {
                     // Verify sender is the contact (safety check)
                     if (Objects.equals(chatKeyPart.getSender(), chat.getContactUsername())) {
-                        key = chatKeyPart.getKeypart().modPow(a, chat.getP()).toByteArray();
-                        System.out.println("[" + username + "] Calculated shared key: " + java.util.Arrays.toString(key));
+                        // Calculate shared key: g^(a*b) mod p
+                        BigInteger sharedKeyBigInt = chatKeyPart.getKeypart().modPow(a, chat.getP());
+                        
+                        // Extract only the required number of bytes from the shared key
+                        int requiredKeyBytes = getRequiredKeyLengthBytes(chat.getAlgorithm());
+                        byte[] fullKeyBytes = sharedKeyBigInt.toByteArray();
+                        
+                        // Handle sign bit (BigInteger.toByteArray() may include sign bit)
+                        if (fullKeyBytes[0] == 0 && fullKeyBytes.length > requiredKeyBytes) {
+                            // Remove leading zero byte
+                            byte[] temp = new byte[fullKeyBytes.length - 1];
+                            System.arraycopy(fullKeyBytes, 1, temp, 0, temp.length);
+                            fullKeyBytes = temp;
+                        }
+                        
+                        // Extract the required number of bytes
+                        if (fullKeyBytes.length >= requiredKeyBytes) {
+                            // Take the last requiredKeyBytes bytes (most significant)
+                            key = new byte[requiredKeyBytes];
+                            System.arraycopy(fullKeyBytes, fullKeyBytes.length - requiredKeyBytes, key, 0, requiredKeyBytes);
+                        } else {
+                            // If key is shorter than required, pad with zeros at the beginning
+                            key = new byte[requiredKeyBytes];
+                            System.arraycopy(fullKeyBytes, 0, key, requiredKeyBytes - fullKeyBytes.length, fullKeyBytes.length);
+                        }
+                        
+                        System.out.println("[" + username + "] Calculated shared key (length: " + key.length + " bytes): " + java.util.Arrays.toString(key));
                     } else {
                         System.out.println("[" + username + "] Ignoring key part from unexpected sender: " + chatKeyPart.getSender() + 
                                          " (expected: " + chat.getContactUsername() + ")");
