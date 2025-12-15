@@ -16,6 +16,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
 import java.util.Base64;
+import java.util.HexFormat;
 
 public class ChatView extends BorderPane {
     private final ApiClient apiClient;
@@ -30,6 +31,10 @@ public class ChatView extends BorderPane {
     private Label chatInfoLabel;
     private ProgressIndicator encryptionProgress;
     private Task<String> currentEncryptionTask;
+    private TextField ivInputField;
+    private Button generateIVButton;
+    private Label ivLabel;
+    private byte[] currentIV;
 
     public ChatView(ApiClient apiClient, Chat chat, Main app) {
         this.apiClient = apiClient;
@@ -167,7 +172,28 @@ public class ChatView extends BorderPane {
 
         inputBox.getChildren().addAll(messageLabel, messageInput, sendButton, encryptButton, cancelEncryptButton, encryptionProgress);
 
-        bottomBox.getChildren().add(inputBox);
+        // IV management section
+        HBox ivBox = new HBox(10);
+        ivBox.setAlignment(Pos.CENTER_LEFT);
+        ivBox.setPadding(new Insets(5, 0, 0, 0));
+
+        Label ivLabelText = new Label("IV:");
+        ivInputField = new TextField();
+        ivInputField.setPrefWidth(300);
+        ivInputField.setPromptText("Enter IV (hex or base64) or leave empty for random");
+        ivInputField.textProperty().addListener((obs, oldVal, newVal) -> {
+            updateIVFromInput();
+        });
+
+        generateIVButton = new Button("Generate Random");
+        generateIVButton.setOnAction(e -> generateRandomIV());
+
+        ivLabel = new Label();
+        ivLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+
+        ivBox.getChildren().addAll(ivLabelText, ivInputField, generateIVButton, ivLabel);
+
+        bottomBox.getChildren().addAll(inputBox, ivBox);
         setBottom(bottomBox);
 
         // Add placeholder message
@@ -248,8 +274,20 @@ public class ChatView extends BorderPane {
                 dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
                 int blockSize = blockCipher.blockSize();
                 
-                // Generate IV (same size as block size)
-                byte[] iv = EncryptionUtil.generateIV(blockSize);
+                // Use stored IV or generate new one
+                byte[] iv;
+                if (currentIV != null && currentIV.length == blockSize) {
+                    iv = currentIV.clone();
+                } else {
+                    // Generate new IV if stored one is invalid or missing
+                    iv = EncryptionUtil.generateIV(blockSize);
+                    // Update stored IV
+                    final byte[] finalIV = iv.clone();
+                    Platform.runLater(() -> {
+                        currentIV = finalIV;
+                        updateIVDisplay();
+                    });
+                }
                 
                 // Create cipher
                 SymmetricCipher cipher = EncryptionUtil.createCipher(
@@ -338,6 +376,93 @@ public class ChatView extends BorderPane {
         cancelEncryptButton.setDisable(true);
         encryptionProgress.setVisible(false);
         currentEncryptionTask = null;
+    }
+
+    private void generateRandomIV() {
+        if (app.socket == null || app.socket.getKey() == null) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setContentText("Key not available. Cannot determine IV size.");
+            alert.show();
+            return;
+        }
+
+        try {
+            byte[] key = app.socket.getKey();
+            dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
+            int blockSize = blockCipher.blockSize();
+            
+            currentIV = EncryptionUtil.generateIV(blockSize);
+            updateIVDisplay();
+        } catch (Exception e) {
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setContentText("Failed to generate IV: " + e.getMessage());
+            alert.show();
+        }
+    }
+
+    private void updateIVFromInput() {
+        String ivText = ivInputField.getText().trim();
+        if (ivText.isEmpty()) {
+            currentIV = null;
+            ivLabel.setText("");
+            return;
+        }
+
+        try {
+            byte[] iv;
+            // Try to parse as hex first (must be even number of hex digits)
+            if (ivText.matches("[0-9A-Fa-f]+") && ivText.length() % 2 == 0) {
+                HexFormat hexFormat = HexFormat.of();
+                iv = hexFormat.parseHex(ivText);
+            } else {
+                // Try to parse as base64
+                iv = Base64.getDecoder().decode(ivText);
+            }
+
+            // Validate IV size if key is available
+            if (app.socket != null && app.socket.getKey() != null) {
+                byte[] key = app.socket.getKey();
+                dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
+                int blockSize = blockCipher.blockSize();
+                
+                if (iv.length != blockSize) {
+                    ivLabel.setText("Invalid size: " + iv.length + " bytes (expected " + blockSize + ")");
+                    ivLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: red;");
+                    currentIV = null;
+                    return;
+                }
+            } else {
+                // Key not available yet, just store the IV (will be validated during encryption)
+                ivLabel.setText("IV set: " + iv.length + " bytes (will validate on encryption)");
+                ivLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: orange;");
+            }
+
+            currentIV = iv;
+            if (app.socket != null && app.socket.getKey() != null) {
+                updateIVDisplay();
+            }
+        } catch (Exception e) {
+            ivLabel.setText("Invalid format: " + e.getMessage());
+            ivLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: red;");
+            currentIV = null;
+        }
+    }
+
+    private void updateIVDisplay() {
+        if (currentIV == null) {
+            ivLabel.setText("");
+            ivInputField.clear();
+            return;
+        }
+
+        // Display IV in hex format
+        HexFormat hexFormat = HexFormat.of().withUpperCase();
+        String hexIV = hexFormat.formatHex(currentIV);
+        ivLabel.setText("Current IV: " + hexIV);
+        ivLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: green;");
+        
+        // Update input field with hex representation
+        ivInputField.setText(hexIV);
     }
 
     private void handleDisconnect() {
