@@ -12,7 +12,7 @@ public class ChatRequest {
     @JsonProperty("contactId")
     private Long contactId;
 
-    @Schema(description = "Encryption algorithm", example = "DES", allowableValues = {"DES", "DEAL", "RC5", "RIJNDAEL"})
+    @Schema(description = "Encryption algorithm", example = "MARS", allowableValues = {"MARS", "RC5"})
     @JsonProperty("algorithm")
     private String algorithm;
 

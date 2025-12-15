@@ -87,8 +87,8 @@ public class ChatManagementView extends VBox {
         // Algorithm selection
         grid.add(new Label("Algorithm:"), 0, 1);
         algorithmComboBox = new ComboBox<>();
-        algorithmComboBox.getItems().addAll("DES", "DEAL", "RC5", "RIJNDAEL");
-        algorithmComboBox.setValue("DES");
+        algorithmComboBox.getItems().addAll("MARS", "RC5");
+        algorithmComboBox.setValue("MARS");
         grid.add(algorithmComboBox, 1, 1);
 
         // Mode selection

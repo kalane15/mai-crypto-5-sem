@@ -49,7 +49,7 @@ public class ChatWebSocketClient {
      * as the final key length. We use a smaller exponent for efficiency while
      * maintaining security.
      * 
-     * @param algorithm The encryption algorithm (DES, DEAL, RC5, RIJNDAEL)
+     * @param algorithm The encryption algorithm (MARS, RC5)
      * @param p The prime modulus
      * @return A random BigInteger 'a' suitable for the key length
      */
@@ -89,10 +89,8 @@ public class ChatWebSocketClient {
      */
     private int getRequiredKeyLengthBits(String algorithm) {
         return switch (algorithm.toUpperCase()) {
-            case "DES" -> 64;  // DES uses 64-bit keys (8 bytes)
-            case "DEAL" -> 256; // DEAL supports up to 256-bit keys, use maximum for security
+            case "MARS" -> 256; // MARS supports 128-448 bit keys, use 256 for security
             case "RC5" -> 256;  // RC5 supports variable keys, use 256 for security
-            case "RIJNDAEL" -> 256; // RIJNDAEL supports up to 256-bit keys, use maximum
             default -> 256; // Default to 256 bits for unknown algorithms
         };
     }

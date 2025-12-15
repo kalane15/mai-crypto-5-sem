@@ -2,12 +2,9 @@ package dora.crypto;
 
 import dora.crypto.SymmetricCipher;
 import dora.crypto.block.BlockCipher;
-import dora.crypto.block.deal.DealBlockCipher;
-import dora.crypto.block.des.DesBlockCipher;
+import dora.crypto.block.mars.MarsBlockCipher;
 import dora.crypto.block.rc5.Rc5BlockCipher;
 import dora.crypto.block.rc5.Rc5Parameters;
-import dora.crypto.block.rijndael.RijndaelBlockCipher;
-import dora.crypto.block.rijndael.RijndaelParameters;
 
 import java.security.SecureRandom;
 
@@ -15,8 +12,7 @@ public class EncryptionUtil {
 
     public static BlockCipher createBlockCipher(String algorithm, byte[] key) {
         return switch (algorithm.toUpperCase()) {
-            case "DES" -> new DesBlockCipher();
-            case "DEAL" -> new DealBlockCipher(key);
+            case "MARS" -> new MarsBlockCipher();
             case "RC5" -> {
                 // RC5 requires parameters - using defaults: 32-bit words, 12 rounds
                 Rc5Parameters params = new Rc5Parameters(
@@ -25,11 +21,6 @@ public class EncryptionUtil {
                     key.length
                 );
                 yield new Rc5BlockCipher(params);
-            }
-            case "RIJNDAEL" -> {
-                // Rijndael requires parameters - using AES-128 as default
-                RijndaelParameters params = RijndaelParameters.aes128();
-                yield new RijndaelBlockCipher(params);
             }
             default -> throw new IllegalArgumentException("Unsupported algorithm: " + algorithm);
         };
