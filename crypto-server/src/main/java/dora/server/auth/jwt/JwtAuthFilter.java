@@ -33,44 +33,54 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
-        // Пропускаем фильтр для эндпоинтов аутентификации
-        String requestPath = request.getRequestURI();
-        if (requestPath != null && requestPath.startsWith("/auth")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
         // Получаем токен из заголовка
         var authHeader = request.getHeader(HEADER_NAME);
         if (StringUtils.isEmpty(authHeader) || !StringUtils.startsWith(authHeader, BEARER_PREFIX)) {
+            // No token provided - let Spring Security handle authorization
+            // If endpoint requires authentication, Spring Security will reject it
             filterChain.doFilter(request, response);
             return;
         }
 
-        // Обрезаем префикс и получаем имя пользователя из токена
-        var jwt = authHeader.substring(BEARER_PREFIX.length());
-        var username = jwtService.extractUserName(jwt);
+        try {
+            // Обрезаем префикс и получаем имя пользователя из токена
+            var jwt = authHeader.substring(BEARER_PREFIX.length());
+            var username = jwtService.extractUserName(jwt);
 
-        if (StringUtils.isNotEmpty(username) && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = userService
-                    .userDetailsService()
-                    .loadUserByUsername(username);
+            if (StringUtils.isNotEmpty(username) && SecurityContextHolder.getContext().getAuthentication() == null) {
+                try {
+                    UserDetails userDetails = userService
+                            .userDetailsService()
+                            .loadUserByUsername(username);
 
-            // Если токен валиден, то аутентифицируем пользователя
-            if (jwtService.isTokenValid(jwt, userDetails)) {
-                SecurityContext context = SecurityContextHolder.createEmptyContext();
+                    // Если токен валиден, то аутентифицируем пользователя
+                    if (jwtService.isTokenValid(jwt, userDetails)) {
+                        SecurityContext context = SecurityContextHolder.createEmptyContext();
 
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        userDetails,
-                        null,
-                        userDetails.getAuthorities()
-                );
+                        UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                                userDetails,
+                                null,
+                                userDetails.getAuthorities()
+                        );
 
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                context.setAuthentication(authToken);
-                SecurityContextHolder.setContext(context);
+                        authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        context.setAuthentication(authToken);
+                        SecurityContextHolder.setContext(context);
+                    } else {
+                        // Token is invalid (expired or doesn't match user)
+                        System.err.println("Invalid JWT token for user: " + username);
+                    }
+                } catch (Exception e) {
+                    // User not found or other error loading user
+                    System.err.println("Error loading user for JWT token: " + e.getMessage());
+                }
             }
+        } catch (Exception e) {
+            // JWT parsing failed (malformed token, expired, etc.)
+            System.err.println("JWT parsing error: " + e.getMessage());
+            // Continue filter chain - Spring Security will handle authorization
         }
+        
         filterChain.doFilter(request, response);
     }
 }

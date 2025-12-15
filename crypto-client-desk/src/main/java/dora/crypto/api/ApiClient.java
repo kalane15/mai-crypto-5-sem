@@ -16,19 +16,30 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
 public class ApiClient {
     public static final String BASE_URL = "http://localhost:8080";
     public static final String BASE_URL_NO_PROTOCOL = "//localhost:8080";
+    
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private String authToken;
+    private String authToken; // Token stored only in RAM
+    private Consumer<String> onTokenInvalidCallback; // Callback when token is invalid
 
     public ApiClient() {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
         this.objectMapper = new ObjectMapper();
+    }
+
+    /**
+     * Sets a callback to be invoked when the token becomes invalid (401/403).
+     * The callback receives the error message.
+     */
+    public void setOnTokenInvalid(Consumer<String> callback) {
+        this.onTokenInvalidCallback = callback;
     }
 
     public void setAuthToken(String token) {
@@ -39,6 +50,10 @@ public class ApiClient {
         this.authToken = null;
     }
 
+    public String getAuthToken() {
+        return authToken;
+    }
+
     private HttpRequest.Builder createRequestBuilder(String endpoint) {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + endpoint))
@@ -46,11 +61,33 @@ public class ApiClient {
 
         if (authToken != null && !authToken.isEmpty()) {
             builder.header("Authorization", "Bearer " + authToken);
+            System.out.println("DEBUG: Sending request to " + endpoint + " with Authorization header");
         } else {
             System.err.println("WARNING: No auth token available for request to " + endpoint);
         }
 
         return builder;
+    }
+
+    /**
+     * Handles HTTP response and clears token if unauthorized (401) or forbidden (403).
+     * Returns true if the response indicates the token should be cleared.
+     */
+    private boolean handleUnauthorized(int statusCode, String errorMessage) {
+        if (statusCode == 401 || statusCode == 403) {
+            System.err.println("Received " + statusCode + " - clearing invalid token");
+            clearAuthToken();
+            
+            // Notify callback if set
+            if (onTokenInvalidCallback != null) {
+                String message = errorMessage != null ? errorMessage : 
+                    (statusCode == 401 ? "Unauthorized - please sign in again" : "Forbidden - please sign in again");
+                onTokenInvalidCallback.accept(message);
+            }
+            
+            return true;
+        }
+        return false;
     }
 
     // Authentication
@@ -59,7 +96,10 @@ public class ApiClient {
             SignUpRequest request = new SignUpRequest(username, password);
             String jsonBody = objectMapper.writeValueAsString(request);
 
-            HttpRequest httpRequest = createRequestBuilder("/auth/sign-up")
+            // Auth endpoints don't need tokens
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(BASE_URL + "/auth/sign-up"))
+                    .timeout(Duration.ofSeconds(30))
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                     .header("Content-Type", "application/json")
                     .build();
@@ -87,7 +127,10 @@ public class ApiClient {
             SignInRequest request = new SignInRequest(username, password);
             String jsonBody = objectMapper.writeValueAsString(request);
 
-            HttpRequest httpRequest = createRequestBuilder("/auth/sign-in")
+            // Auth endpoints don't need tokens
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(BASE_URL + "/auth/sign-in"))
+                    .timeout(Duration.ofSeconds(30))
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                     .header("Content-Type", "application/json")
                     .build();
@@ -122,6 +165,9 @@ public class ApiClient {
 
             return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                     .thenApply(response -> {
+                        if (handleUnauthorized(response.statusCode(), response.body())) {
+                            throw new RuntimeException("Unauthorized - please sign in again");
+                        }
                         if (response.statusCode() >= 200 && response.statusCode() < 300) {
                             return null;
                         } else {
@@ -140,6 +186,9 @@ public class ApiClient {
 
         return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
                     if (response.statusCode() == 200) {
                         try {
                             return objectMapper.readValue(
@@ -162,6 +211,9 @@ public class ApiClient {
 
         return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
                     if (response.statusCode() >= 200 && response.statusCode() < 300) {
                         return null;
                     } else {
@@ -177,6 +229,9 @@ public class ApiClient {
 
         return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
                     if (response.statusCode() >= 200 && response.statusCode() < 300) {
                         return null;
                     } else {
@@ -192,6 +247,9 @@ public class ApiClient {
 
         return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
                     if (response.statusCode() >= 200 && response.statusCode() < 300) {
                         return null;
                     } else {
@@ -213,6 +271,9 @@ public class ApiClient {
 
             return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                     .thenApply(response -> {
+                        if (handleUnauthorized(response.statusCode(), response.body())) {
+                            throw new RuntimeException("Unauthorized - please sign in again");
+                        }
                         if (response.statusCode() >= 200 && response.statusCode() < 300) {
                             try {
                                 return objectMapper.readValue(response.body(), Chat.class);
@@ -235,6 +296,9 @@ public class ApiClient {
 
         return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
                     if (response.statusCode() == 200) {
                         try {
                             return objectMapper.readValue(
@@ -257,6 +321,9 @@ public class ApiClient {
 
         return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
                     if (response.statusCode() >= 200 && response.statusCode() < 300) {
                         return null;
                     } else {
@@ -272,6 +339,9 @@ public class ApiClient {
 
         return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
                     if (response.statusCode() >= 200 && response.statusCode() < 300) {
                         return null;
                     } else {

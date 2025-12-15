@@ -26,6 +26,14 @@ public class Main extends Application {
         this.primaryStage = stage;
         this.apiClient = new ApiClient();
 
+        // Set up callback for when token becomes invalid
+        apiClient.setOnTokenInvalid(message -> {
+            Platform.runLater(() -> {
+                System.out.println("Token invalid: " + message);
+                showAuthView();
+            });
+        });
+
         // Create views
         authView = new AuthView(apiClient, this::onAuthSuccess, this);
         mainView = new MainView(apiClient, this);
