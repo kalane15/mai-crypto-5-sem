@@ -7,9 +7,9 @@ import dora.crypto.shared.dto.Chat;
 import dora.server.auth.User;
 import dora.server.auth.UserService;
 import dora.server.contact.ContactRepository;
+import dora.server.kafka.KafkaMessageProducer;
+import dora.server.kafka.KafkaMessageWrapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,13 +20,10 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ChatService {
-    @Autowired
-    private SimpMessagingTemplate messagingTemplate;
-
-
     private final ChatRepository chatRepository;
     private final ContactRepository contactRepository;
     private final UserService userService;
+    private final KafkaMessageProducer kafkaMessageProducer;
 
     public Chat createChat(ChatRequest request) {
         User currentUser = userService.getCurrentUser();
@@ -162,15 +159,25 @@ public class ChatService {
     }
 
     public void sendMessage(Long chatId, ChatMessage message) {
-        String topic = "/topic/messages/" + chatId + "/" + message.getReceiver();
-        System.out.println("Sending ChatMessage to topic: " + topic + ", Message: " + message);
-        messagingTemplate.convertAndSend(topic, message);
+        System.out.println("Publishing ChatMessage to Kafka: chatId=" + chatId + ", Message: " + message);
+        KafkaMessageWrapper wrapper = KafkaMessageWrapper.forChatMessage(chatId, message);
+        kafkaMessageProducer.publishMessage(chatId, wrapper)
+                .exceptionally(ex -> {
+                    System.err.println("Failed to publish message to Kafka: " + ex.getMessage());
+                    ex.printStackTrace();
+                    return null;
+                });
     }
 
     public void sendKeyPart(Long chatId, ChatKeyPart keyPart) {
-        String topic = "/topic/messages/" + chatId + "/" + keyPart.getReceiver();
-        System.out.println("Sending ChatKeyPart to topic: " + topic + ", Sender: " + keyPart.getSender() + ", Receiver: " + keyPart.getReceiver());
-        messagingTemplate.convertAndSend(topic, keyPart);
+        System.out.println("Publishing ChatKeyPart to Kafka: chatId=" + chatId + ", Sender: " + keyPart.getSender() + ", Receiver: " + keyPart.getReceiver());
+        KafkaMessageWrapper wrapper = KafkaMessageWrapper.forKeyPart(chatId, keyPart);
+        kafkaMessageProducer.publishMessage(chatId, wrapper)
+                .exceptionally(ex -> {
+                    System.err.println("Failed to publish key part to Kafka: " + ex.getMessage());
+                    ex.printStackTrace();
+                    return null;
+                });
     }
 
     @Transactional

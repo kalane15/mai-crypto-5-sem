@@ -31,6 +31,8 @@ public class ChatWebSocketClient {
     private String username;
     private final BigInteger a;
     private Consumer<ChatMessage> onMessageReceived;
+    private Runnable onSubscriptionReady;
+    private boolean subscriptionReady = false;
 
     public ChatWebSocketClient(String url, Chat chat, String username) {
         this.url = url + "/chat";
@@ -106,6 +108,30 @@ public class ChatWebSocketClient {
         this.onMessageReceived = callback;
     }
 
+    public void setOnSubscriptionReady(Runnable callback) {
+        this.onSubscriptionReady = callback;
+    }
+
+    public boolean isSubscriptionReady() {
+        return subscriptionReady;
+    }
+
+    /**
+     * Manually trigger key exchange by sending key part.
+     * This is useful when connecting to a chat that's already in CONNECTED2 status.
+     */
+    public void initiateKeyExchange() {
+        if (sessionHandler != null && sessionHandler instanceof ChatStompSessionHandler) {
+            ChatStompSessionHandler handler = (ChatStompSessionHandler) sessionHandler;
+            if (handler.session != null && handler.session.isConnected() && subscriptionReady) {
+                System.out.println("[" + username + "] Manually initiating key exchange...");
+                handler.sendKeyPart();
+            } else {
+                System.err.println("[" + username + "] Cannot initiate key exchange - session not ready");
+            }
+        }
+    }
+
     public void sendMessage(String messageText) {
         if (sessionHandler != null && sessionHandler instanceof ChatStompSessionHandler) {
             ChatStompSessionHandler handler = (ChatStompSessionHandler) sessionHandler;
@@ -167,6 +193,22 @@ public class ChatWebSocketClient {
             var handler = new ChatMessageHandler();
             handler.parentHandler = this;
             session.subscribe(topic, handler);
+            
+            // Mark subscription as ready after a short delay to ensure it's active
+            // STOMP subscriptions are typically ready immediately, but we add a small delay
+            // to ensure the subscription is fully processed by the server
+            new Thread(() -> {
+                try {
+                    Thread.sleep(100); // Small delay to ensure subscription is active
+                    subscriptionReady = true;
+                    System.out.println("[" + username + "] Subscription ready for topic: " + topic);
+                    if (onSubscriptionReady != null) {
+                        onSubscriptionReady.run();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }).start();
         }
 
         @Override

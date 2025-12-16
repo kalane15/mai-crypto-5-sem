@@ -10,8 +10,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
+import lombok.extern.slf4j.Slf4j;
 
 @Controller
+@Slf4j
 public class ChatWebSocketController {
     @Autowired
     private SimpMessagingTemplate messagingTemplate;
@@ -27,7 +29,7 @@ public class ChatWebSocketController {
 
     @MessageMapping("/sendMessage")
     public void processMessage(ChatMessage message) {
-        System.out.println("Received message: " + message);
+        log.info("Received message via WebSocket: {}", message);
         // Find chat by sender and receiver
         var sender = userService.getByUsername(message.getSender());
         var receiver = userService.getByUsername(message.getReceiver());
@@ -39,15 +41,16 @@ public class ChatWebSocketController {
         
         if (chatOpt.isPresent()) {
             var chat = chatOpt.get();
+            // Send message through Kafka (asynchronous)
             chatService.sendMessage(chat.getId(), message);
         } else {
-            System.err.println("Chat not found for users: " + message.getSender() + " and " + message.getReceiver());
+            log.error("Chat not found for users: {} and {}", message.getSender(), message.getReceiver());
         }
     }
 
     @MessageMapping("/sendKeyPart")
     public void processKeyPart(ChatKeyPart keyPart) {
-        System.out.println("Received key part: " + keyPart.getKeypart());
+        log.info("Received key part via WebSocket: sender={}, receiver={}", keyPart.getSender(), keyPart.getReceiver());
         // Find chat by sender and receiver
         var sender = userService.getByUsername(keyPart.getSender());
         var receiver = userService.getByUsername(keyPart.getReceiver());
@@ -59,9 +62,10 @@ public class ChatWebSocketController {
         
         if (chatOpt.isPresent()) {
             var chat = chatOpt.get();
+            // Send key part through Kafka (asynchronous)
             chatService.sendKeyPart(chat.getId(), keyPart);
         } else {
-            System.err.println("Chat not found for users: " + keyPart.getSender() + " and " + keyPart.getReceiver());
+            log.error("Chat not found for users: {} and {}", keyPart.getSender(), keyPart.getReceiver());
         }
     }
 }

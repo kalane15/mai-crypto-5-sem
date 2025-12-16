@@ -18,6 +18,7 @@ public class Main extends Application {
     private MainView mainView;
     private ChatView currentChatView;
     private Scene mainViewScene;
+    private Scene authViewScene;
     public ChatWebSocketClient socket;
     public String UserName = "";
 
@@ -51,8 +52,14 @@ public class Main extends Application {
     }
 
     private void showAuthView() {
-        Scene scene = new Scene(authView, 600, 500);
-        primaryStage.setScene(scene);
+        // Reuse the existing authViewScene instead of creating a new one
+        if (authViewScene != null) {
+            primaryStage.setScene(authViewScene);
+        } else {
+            // Create scene if it doesn't exist (first time)
+            authViewScene = new Scene(authView, 600, 500);
+            primaryStage.setScene(authViewScene);
+        }
     }
 
     private void onAuthSuccess(String username) {
@@ -65,8 +72,15 @@ public class Main extends Application {
 
     public boolean manageConnectToChat(Chat chat) {
         socket = new ChatWebSocketClient("ws:" + ApiClient.BASE_URL_NO_PROTOCOL, chat, UserName);
-        var future = socket.start();
-        future.thenRun(() -> apiClient.connectToChat(chat.getId()));
+        
+        // Set up callback to call connectToChat after subscription is ready
+        // This ensures we're subscribed before the server sends "ready for key exchange"
+        socket.setOnSubscriptionReady(() -> {
+            System.out.println("Subscription ready, calling connectToChat for chat " + chat.getId());
+            apiClient.connectToChat(chat.getId());
+        });
+        
+        socket.start();
         return true;
     }
 
