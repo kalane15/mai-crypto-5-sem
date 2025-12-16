@@ -44,6 +44,10 @@ public class ChatView extends BorderPane {
         setupWebSocket();
     }
 
+    public Chat getChat() {
+        return chat;
+    }
+
     private void setupWebSocket() {
         // Set up message callback when WebSocket client is available
         if (app.socket != null) {
@@ -70,6 +74,19 @@ public class ChatView extends BorderPane {
     private void onMessageReceived(ChatMessage message) {
         Platform.runLater(() -> {
             String messageText = message.getMessage();
+            
+            // Handle system messages
+            if ("SYSTEM".equals(message.getSender()) && "chat deleted".equals(messageText)) {
+                // Chat was deleted, switch to main view
+                Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                alert.setTitle("Chat Deleted");
+                alert.setHeaderText("Chat Deleted");
+                alert.setContentText("This chat has been deleted. Returning to main screen.");
+                alert.showAndWait();
+                app.showMainView();
+                return;
+            }
+            
             String displayText;
             
             // Check if message is encrypted

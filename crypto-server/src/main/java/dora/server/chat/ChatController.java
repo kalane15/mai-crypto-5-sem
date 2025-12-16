@@ -68,5 +68,16 @@ public class ChatController {
             return ResponseEntity.badRequest().build();
         }
     }
+
+    @Operation(summary = "Delete a chat")
+    @DeleteMapping("/{chatId}/delete")
+    public ResponseEntity<Void> deleteChat(@PathVariable("chatId") Long chatId) {
+        try {
+            chatService.deleteChat(chatId);
+            return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
 }
 

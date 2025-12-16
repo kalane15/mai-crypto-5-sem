@@ -191,14 +191,89 @@ public class ChatService {
             throw new IllegalArgumentException("You can only disconnect from your own chats");
         }
 
-        if (chat.getUser1() != currentUser
-                && chat.getUser2() != currentUser) {
-            throw new IllegalArgumentException("Chat is not connected");
+        // Check if the user is actually connected
+        boolean isUser1 = chat.getUser1().getUsername().equals(currentUser.getUsername());
+        boolean isUser2 = chat.getUser2().getUsername().equals(currentUser.getUsername());
+        
+        boolean isConnected = (isUser1 && chat.isConnectedUser1()) || (isUser2 && chat.isConnectedUser2());
+        
+        if (!isConnected) {
+            throw new IllegalArgumentException("You are not connected to this chat");
         }
 
-        var newStatus = chat.getStatus().next(-1);
+        // Mark the current user as disconnected
+        if (isUser1) {
+            chat.setConnectedUser1(false);
+        } else if (isUser2) {
+            chat.setConnectedUser2(false);
+        }
+
+        // Update status based on how many users are still connected
+        int connectedCount = (chat.isConnectedUser1() ? 1 : 0) + (chat.isConnectedUser2() ? 1 : 0);
+        dora.server.chat.Chat.ChatStatus newStatus;
+        if (connectedCount == 0) {
+            newStatus = dora.server.chat.Chat.ChatStatus.CREATED;
+        } else if (connectedCount == 1) {
+            newStatus = dora.server.chat.Chat.ChatStatus.CONNECTED1;
+        } else {
+            newStatus = dora.server.chat.Chat.ChatStatus.CONNECTED2;
+        }
+        
         chat.setStatus(newStatus);
+        
+        System.out.println("Chat " + chat.getId() + " status: " + chat.getStatus().name() + 
+                          " (user1 connected: " + chat.isConnectedUser1() + 
+                          ", user2 connected: " + chat.isConnectedUser2() + ")");
+        
         chatRepository.save(chat);
+    }
+
+    @Transactional
+    public void deleteChat(Long chatId) {
+        User currentUser = userService.getCurrentUser();
+        dora.server.chat.Chat chat = chatRepository.findById(chatId)
+                .orElseThrow(() -> new IllegalArgumentException("Chat not found"));
+
+        // Verify that the current user is part of this chat
+        if (!chat.getUser1().getUsername().equals(currentUser.getUsername()) &&
+                !chat.getUser2().getUsername().equals(currentUser.getUsername())) {
+            throw new IllegalArgumentException("You can only delete your own chats");
+        }
+
+        // Manually disconnect all users from the chat before deleting
+        User user1 = chat.getUser1();
+        User user2 = chat.getUser2();
+        
+        // Send "chat deleted" notification to all connected users
+        if (chat.isConnectedUser1()) {
+            var messageToUser1 = ChatMessage.builder()
+                    .receiver(user1.getUsername())
+                    .sender("SYSTEM")
+                    .message("chat deleted")
+                    .build();
+            sendMessage(chatId, messageToUser1);
+        }
+        
+        if (chat.isConnectedUser2()) {
+            var messageToUser2 = ChatMessage.builder()
+                    .receiver(user2.getUsername())
+                    .sender("SYSTEM")
+                    .message("chat deleted")
+                    .build();
+            sendMessage(chatId, messageToUser2);
+        }
+
+        // Disconnect all users by resetting connection flags
+        if (chat.isConnectedUser1() || chat.isConnectedUser2()) {
+            chat.setConnectedUser1(false);
+            chat.setConnectedUser2(false);
+            chat.setStatus(dora.server.chat.Chat.ChatStatus.CREATED);
+            chatRepository.save(chat);
+            System.out.println("Disconnected all users from chat " + chatId + " before deletion");
+        }
+
+        // Delete the chat
+        chatRepository.delete(chat);
     }
 
     private Chat toDto(dora.server.chat.Chat chat, User otherUser) {

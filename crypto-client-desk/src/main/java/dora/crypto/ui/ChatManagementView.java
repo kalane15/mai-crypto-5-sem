@@ -240,6 +240,12 @@ public class ChatManagementView extends VBox {
                 buttonBox.getChildren().add(disconnectButton);
             }
 
+            // Add delete button for all chats
+            Button deleteButton = new Button("Delete");
+            deleteButton.setStyle("-fx-background-color: #ff4444; -fx-text-fill: white;");
+            deleteButton.setOnAction(e -> handleDelete(chat));
+            buttonBox.getChildren().add(deleteButton);
+
             setGraphic(cellBox);
         }
 
@@ -263,6 +269,48 @@ public class ChatManagementView extends VBox {
                         });
                         return null;
                     });
+        }
+
+        private void handleDelete(Chat chat) {
+            // Show confirmation dialog
+            Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
+            confirmAlert.setTitle("Delete Chat");
+            confirmAlert.setHeaderText("Delete Secret Chat");
+            confirmAlert.setContentText("Are you sure you want to delete the chat with " + chat.getContactUsername() + "? This action cannot be undone.");
+
+            confirmAlert.showAndWait().ifPresent(response -> {
+                if (response == ButtonType.OK) {
+                    apiClient.deleteChat(chat.getId())
+                            .thenRun(() -> Platform.runLater(() -> {
+                                // If user is currently viewing this chat, switch to main view
+                                if (app.currentChatView != null) {
+                                    try {
+                                        var currentChat = app.currentChatView.getChat();
+                                        if (currentChat != null && currentChat.getId().equals(chat.getId())) {
+                                            app.showMainView();
+                                        }
+                                    } catch (Exception e) {
+                                        // Chat view might be invalid, just switch to main view
+                                        app.showMainView();
+                                    }
+                                }
+                                parentView.loadChats();
+                                Alert successAlert = new Alert(Alert.AlertType.INFORMATION);
+                                successAlert.setTitle("Chat Deleted");
+                                successAlert.setContentText("Chat deleted successfully.");
+                                successAlert.show();
+                            }))
+                            .exceptionally(ex -> {
+                                Platform.runLater(() -> {
+                                    Alert alert = new Alert(Alert.AlertType.ERROR);
+                                    alert.setTitle("Delete Failed");
+                                    alert.setContentText("Failed to delete chat: " + (ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()));
+                                    alert.show();
+                                });
+                                return null;
+                            });
+                }
+            });
         }
     }
 }

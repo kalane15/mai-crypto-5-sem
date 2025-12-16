@@ -16,7 +16,7 @@ public class Main extends Application {
     private ApiClient apiClient;
     private AuthView authView;
     private MainView mainView;
-    private ChatView currentChatView;
+    public ChatView currentChatView;
     private Scene mainViewScene;
     private Scene authViewScene;
     public ChatWebSocketClient socket;

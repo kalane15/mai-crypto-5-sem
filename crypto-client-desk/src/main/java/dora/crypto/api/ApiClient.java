@@ -349,5 +349,23 @@ public class ApiClient {
                     }
                 });
     }
+
+    public CompletableFuture<Void> deleteChat(Long chatId) {
+        HttpRequest httpRequest = createRequestBuilder("/chats/" + chatId + "/delete")
+                .DELETE()
+                .build();
+
+        return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        return null;
+                    } else {
+                        throw new RuntimeException("Delete chat failed: " + response.statusCode() + " - " + response.body());
+                    }
+                });
+    }
 }
 

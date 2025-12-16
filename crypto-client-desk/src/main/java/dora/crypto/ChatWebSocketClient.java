@@ -359,6 +359,19 @@ public class ChatWebSocketClient {
                 System.out.println("[" + username + "] Received ChatMessage - Receiver: " + chatMessage.getReceiver() + 
                                  ", Sender: " + chatMessage.getSender() + 
                                  ", Message: " + chatMessage.getMessage());
+                
+                // Handle system messages (like "chat deleted")
+                if ("SYSTEM".equals(chatMessage.getSender())) {
+                    if (Objects.equals(chatMessage.getMessage(), "chat deleted")) {
+                        System.out.println("[" + username + "] Received 'chat deleted' notification");
+                        // Notify callback about chat deletion
+                        if (onMessageReceived != null) {
+                            onMessageReceived.accept(chatMessage);
+                        }
+                    }
+                    return;
+                }
+                
                 // Verify sender is the contact (safety check)
                 if (Objects.equals(chatMessage.getSender(), chat.getContactUsername())) {
                     if (Objects.equals(chatMessage.getMessage(), "ready for key exchange")) {
