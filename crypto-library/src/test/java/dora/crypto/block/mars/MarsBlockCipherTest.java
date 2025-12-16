@@ -14,6 +14,36 @@ public class MarsBlockCipherTest {
         blockCipher = new MarsBlockCipher();
     }
 
+    @Example
+    void testKnownVector128BitKey() {
+        // Test vector from MARS specification
+        // KEYSIZE=128
+        // I=1
+        // KEY=00000000000000000000000000000000
+        // PT=00000000000000000000000000000000
+        // CT=DCC07B8DFB0738D6E30A22DFCF27E886
+        byte[] key = hexStringToByteArray("00000000000000000000000000000000");
+        byte[] plaintext = hexStringToByteArray("00000000000000000000000000000000");
+        byte[] expectedCiphertext = hexStringToByteArray("DCC07B8DFB0738D6E30A22DFCF27E886");
+
+        blockCipher.init(key);
+        byte[] ciphertext = blockCipher.encrypt(plaintext);
+        byte[] decrypted = blockCipher.decrypt(ciphertext);
+
+        assertThat(ciphertext).isEqualTo(expectedCiphertext);
+        assertThat(decrypted).isEqualTo(plaintext);
+    }
+
+    private byte[] hexStringToByteArray(String hex) {
+        int len = hex.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4)
+                + Character.digit(hex.charAt(i + 1), 16));
+        }
+        return data;
+    }
+
     @Property(tries = 1000)
     void decryptedCiphertextEqualsPlaintext(
         @ForAll @Size(value = 16) byte[] plaintext,
