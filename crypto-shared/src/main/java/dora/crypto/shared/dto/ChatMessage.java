@@ -6,8 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.math.BigInteger;
-
 @Builder
 @Data
 @NoArgsConstructor
@@ -21,4 +19,7 @@ public class ChatMessage {
 
     @JsonProperty("message")
     private String message;
+
+    @JsonProperty("type")
+    private String type; // "TEXT", "ENCRYPTED", "FILE", "ENCRYPTED_FILE"
 }

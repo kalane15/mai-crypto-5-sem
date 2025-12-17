@@ -140,58 +140,108 @@ public class ChatView extends BorderPane {
                 return;
             }
             
-            // Check if message is a file link
-            if (messageText.startsWith("FILE:")) {
-                String fileId = messageText.substring("FILE:".length()).trim();
-                addMessageToUI(message.getSender(), "[File Attachment]", false, fileId);
-            }
-            // Check if message is encrypted
-            else if (messageText.startsWith("ENCRYPTED:")) {
-                try {
-                    // Decrypt the message
-                    String base64Data = messageText.substring("ENCRYPTED:".length());
-                    byte[] combined = Base64.getDecoder().decode(base64Data);
-                    
-                    // Get block size to determine IV size
-                    byte[] key = app.socket.getKey();
-                    if (key == null) {
-                        addMessageToUI(message.getSender(), "[Encrypted - Key not available]", false, null);
-                    } else {
-                        dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
-                        int blockSize = blockCipher.blockSize();
-                        
-                        // Extract IV and encrypted data
-                        byte[] iv = new byte[blockSize];
-                        byte[] encrypted = new byte[combined.length - blockSize];
-                        System.arraycopy(combined, 0, iv, 0, blockSize);
-                        System.arraycopy(combined, blockSize, encrypted, 0, encrypted.length);
-                        
-                        // Create cipher and decrypt
-                        SymmetricCipher cipher = EncryptionUtil.createCipher(
-                            chat.getAlgorithm(),
-                            chat.getMode(),
-                            chat.getPadding(),
-                            key,
-                            iv
-                        );
-                        
-                        byte[] decrypted = cipher.decrypt(encrypted);
-                        String decryptedMessage = new String(decrypted, "UTF-8");
-                        
-                        // Check if decrypted message is a file link
-                        if (decryptedMessage.startsWith("FILE:")) {
-                            String fileId = decryptedMessage.substring("FILE:".length()).trim();
-                            addMessageToUI(message.getSender(), "[ENCRYPTED FILE]", true, fileId);
-                        } else {
-                            addMessageToUI(message.getSender(), "[ENCRYPTED] " + decryptedMessage, false, null);
-                        }
-                    }
-                } catch (Exception e) {
-                    addMessageToUI(message.getSender(), "[Failed to decrypt: " + e.getMessage() + "]", false, null);
+            // Handle messages based on type field
+            String messageType = message.getType();
+            if (messageType == null) {
+                // Backward compatibility: check prefixes if type is not set
+                if (messageText.startsWith("FILE:")) {
+                    messageType = "FILE";
+                } else if (messageText.startsWith("ENCRYPTED:")) {
+                    messageType = "ENCRYPTED";
+                } else {
+                    messageType = "TEXT";
                 }
-            } else {
-                // Regular unencrypted message
-                addMessageToUI(message.getSender(), messageText, false, null);
+            }
+            
+            switch (messageType) {
+                case "FILE":
+                    // File link message - messageText contains just the fileId
+                    addMessageToUI(message.getSender(), "[File Attachment]", false, messageText);
+                    break;
+                    
+                case "ENCRYPTED":
+                    try {
+                        // Decrypt the message - messageText contains base64 encoded IV+encrypted data
+                        byte[] combined = Base64.getDecoder().decode(messageText);
+                        
+                        // Get block size to determine IV size
+                        byte[] key = app.socket.getKey();
+                        if (key == null) {
+                            addMessageToUI(message.getSender(), "[Encrypted - Key not available]", false, null);
+                        } else {
+                            dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
+                            int blockSize = blockCipher.blockSize();
+                            
+                            // Extract IV and encrypted data
+                            byte[] iv = new byte[blockSize];
+                            byte[] encrypted = new byte[combined.length - blockSize];
+                            System.arraycopy(combined, 0, iv, 0, blockSize);
+                            System.arraycopy(combined, blockSize, encrypted, 0, encrypted.length);
+                            
+                            // Create cipher and decrypt
+                            SymmetricCipher cipher = EncryptionUtil.createCipher(
+                                chat.getAlgorithm(),
+                                chat.getMode(),
+                                chat.getPadding(),
+                                key,
+                                iv
+                            );
+                            
+                            byte[] decrypted = cipher.decrypt(encrypted);
+                            String decryptedMessage = new String(decrypted, "UTF-8");
+                            
+                            // For backward compatibility, check if decrypted message has FILE: prefix
+                            if (decryptedMessage.startsWith("FILE:")) {
+                                String fileId = decryptedMessage.substring("FILE:".length()).trim();
+                                addMessageToUI(message.getSender(), "[ENCRYPTED FILE]", true, fileId);
+                            } else {
+                                addMessageToUI(message.getSender(), "[ENCRYPTED] " + decryptedMessage, false, null);
+                            }
+                        }
+                    } catch (Exception e) {
+                        addMessageToUI(message.getSender(), "[Failed to decrypt: " + e.getMessage() + "]", false, null);
+                    }
+                    break;
+                    
+                case "ENCRYPTED_FILE":
+                    // Encrypted file - messageText contains base64 encoded IV+encrypted data, decrypted data is fileId
+                    try {
+                        byte[] combined = Base64.getDecoder().decode(messageText);
+                        
+                        byte[] key = app.socket.getKey();
+                        if (key == null) {
+                            addMessageToUI(message.getSender(), "[Encrypted File - Key not available]", false, null);
+                        } else {
+                            dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
+                            int blockSize = blockCipher.blockSize();
+                            
+                            byte[] iv = new byte[blockSize];
+                            byte[] encrypted = new byte[combined.length - blockSize];
+                            System.arraycopy(combined, 0, iv, 0, blockSize);
+                            System.arraycopy(combined, blockSize, encrypted, 0, encrypted.length);
+                            
+                            SymmetricCipher cipher = EncryptionUtil.createCipher(
+                                chat.getAlgorithm(),
+                                chat.getMode(),
+                                chat.getPadding(),
+                                key,
+                                iv
+                            );
+                            
+                            byte[] decrypted = cipher.decrypt(encrypted);
+                            String fileId = new String(decrypted, "UTF-8");
+                            addMessageToUI(message.getSender(), "[ENCRYPTED FILE]", true, fileId);
+                        }
+                    } catch (Exception e) {
+                        addMessageToUI(message.getSender(), "[Failed to decrypt file: " + e.getMessage() + "]", false, null);
+                    }
+                    break;
+                    
+                case "TEXT":
+                default:
+                    // Regular unencrypted message
+                    addMessageToUI(message.getSender(), messageText, false, null);
+                    break;
             }
         });
     }
@@ -435,8 +485,8 @@ public class ChatView extends BorderPane {
                 
                 String base64Encrypted = Base64.getEncoder().encodeToString(combined);
                 
-                // Format: "ENCRYPTED:<base64>"
-                return "ENCRYPTED:" + base64Encrypted;
+                // Return just the base64 data, type will be set when sending
+                return base64Encrypted;
             }
         };
 
@@ -447,9 +497,9 @@ public class ChatView extends BorderPane {
                 // Display encrypted message indicator
                 addMessageToUI("You", "[ENCRYPTED] " + message, false, null);
                 
-                // Send encrypted message
+                // Send encrypted message with type "ENCRYPTED"
                 if (app.socket != null && app.socket.isConnected()) {
-                    app.socket.sendMessage(encryptedMessage);
+                    app.socket.sendMessage(encryptedMessage, "ENCRYPTED");
                     messageInput.clear();
                 }
             }
@@ -919,10 +969,9 @@ public class ChatView extends BorderPane {
         uploadTask.setOnSucceeded(e -> {
             String fileId = uploadTask.getValue();
             if (fileId != null) {
-                // Send file link via WebSocket
-                String fileMessage = "FILE:" + fileId;
+                // Send file link via WebSocket with type "FILE"
                 if (app.socket != null && app.socket.isConnected()) {
-                    app.socket.sendMessage(fileMessage);
+                    app.socket.sendMessage(fileId, "FILE");
                     addMessageToUI("You", "[File Attachment]", false, fileId);
                 }
                 fileStatusLabel.setText("File uploaded and sent successfully!");

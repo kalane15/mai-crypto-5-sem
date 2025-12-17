@@ -11,8 +11,6 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
-import java.util.List;
-
 public class ChatManagementView extends VBox {
     private final ApiClient apiClient;
     private ListView<Chat> chatListView;
@@ -181,11 +179,58 @@ public class ChatManagementView extends VBox {
                 })
                 .exceptionally(ex -> {
                     Platform.runLater(() -> {
-                        statusLabel.setText("Failed to create chat: " + ex.getCause().getMessage());
+                        String errorMessage = getChatErrorMessage(ex);
+                        statusLabel.setText(errorMessage);
                         statusLabel.setStyle("-fx-text-fill: red;");
                     });
                     return null;
                 });
+    }
+
+    /**
+     * Extracts and formats user-friendly error messages for chat creation errors.
+     */
+    private String getChatErrorMessage(Throwable ex) {
+        if (ex == null) {
+            return "Failed to create chat. Please try again.";
+        }
+
+        Throwable cause = ex.getCause();
+        if (cause == null) {
+            cause = ex;
+        }
+
+        String message = cause.getMessage();
+        if (message == null || message.isEmpty()) {
+            return "Failed to create chat. Please try again.";
+        }
+
+        // Check for specific error patterns
+        String lowerMessage = message.toLowerCase();
+        
+        // Chat already exists
+        if (lowerMessage.contains("chat already exists") || 
+            lowerMessage.contains("chat already exists with this contact")) {
+            return "A chat with this contact already exists. Please select a different contact or use the existing chat.";
+        }
+
+        // Contact not found
+        if (lowerMessage.contains("contact not found")) {
+            return "The selected contact was not found. Please refresh and try again.";
+        }
+
+        // Contact not confirmed
+        if (lowerMessage.contains("contact must be confirmed")) {
+            return "The selected contact must be confirmed before creating a chat.";
+        }
+
+        // Permission errors
+        if (lowerMessage.contains("can only create chats with your contacts")) {
+            return "You can only create chats with your contacts.";
+        }
+
+        // Return the original message if it's already user-friendly, otherwise provide a generic message
+        return message;
     }
 
     public void loadChats() {

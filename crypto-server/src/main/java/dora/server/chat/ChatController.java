@@ -21,12 +21,14 @@ public class ChatController {
 
     @Operation(summary = "Create a new secret chat")
     @PostMapping
-    public ResponseEntity<Chat> createChat(@RequestBody @Valid ChatRequest request) {
+    public ResponseEntity<?> createChat(@RequestBody @Valid ChatRequest request) {
         try {
             Chat chat = chatService.createChat(request);
             return ResponseEntity.ok(chat);
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
+            // Return error message in response body
+            return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("message", e.getMessage()));
         }
     }
 

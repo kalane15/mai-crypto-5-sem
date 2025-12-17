@@ -311,7 +311,13 @@ public class ApiClient {
                                 throw new RuntimeException("Failed to parse chat response", e);
                             }
                         } else {
-                            throw new RuntimeException("Create chat failed: " + response.statusCode() + " - " + response.body());
+                            // Extract user-friendly error message from response
+                            String errorMessage = extractErrorMessage(response.body());
+                            if (errorMessage != null && !errorMessage.isEmpty()) {
+                                throw new RuntimeException(errorMessage);
+                            } else {
+                                throw new RuntimeException("Failed to create chat. Please try again.");
+                            }
                         }
                     });
         } catch (Exception e) {
