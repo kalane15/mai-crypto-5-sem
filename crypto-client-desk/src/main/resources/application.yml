@@ -1,0 +1,14 @@
+# Client Database Configuration
+# Set db.type to "sqlite" for file-based SQLite database
+# Set db.type to "postgres" for PostgreSQL database (requires Docker container)
+# Set db.name to create user-specific databases (e.g., "clientdb_alice", "clientdb_bob")
+#   For SQLite: Creates separate files like "client_messages_alice.db"
+#   For PostgreSQL: Uses database name in connection URL
+
+db:
+  type: ${DB_TYPE:sqlite}  # sqlite or postgres
+  url: ${DB_URL:jdbc:postgresql://localhost:5434}  # Base URL without database name
+  user: ${DB_USER:clientuser}
+  password: ${DB_PASSWORD:clientpass}
+  name: ${DB_NAME:clientdb}  # Database name (will be appended to URL for PostgreSQL, used as filename suffix for SQLite)
+

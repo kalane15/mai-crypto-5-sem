@@ -259,9 +259,9 @@ public class ChatWebSocketClient {
             // We do NOT regenerate parameters here to avoid race conditions.
             // Parameters will be regenerated when "ready for key exchange" is received,
             // ensuring both users regenerate at the same time and use matching parameters.
-            key = null;
-            keyPartSentInThisSession = false; // Reset flag for new connection
-            pendingKeyPart = null; // Clear any pending key part from previous session
+            ChatWebSocketClient.this.key = null;
+            ChatWebSocketClient.this.keyPartSentInThisSession = false; // Reset flag for new connection
+            ChatWebSocketClient.this.pendingKeyPart = null; // Clear any pending key part from previous session
             
             System.out.println("[" + username + "] Key reset for new connection - will regenerate parameters when 'ready for key exchange' is received");
             
@@ -303,6 +303,12 @@ public class ChatWebSocketClient {
         }
 
         public void sendKeyPart() {
+            // Ensure we have valid parameters before sending
+            if (constant == null) {
+                System.err.println("[" + username + "] Cannot send key part - parameters not initialized. Regenerating...");
+                regenerateKeyExchangeParameters();
+            }
+            
             var keypart = ChatKeyPart.builder()
                     .sender(username)
                     .receiver(chat.getContactUsername())
@@ -443,6 +449,14 @@ public class ChatWebSocketClient {
                 if (Objects.equals(chatMessage.getSender(), chat.getContactUsername())) {
                     if (Objects.equals(chatMessage.getMessage(), "ready for key exchange")) {
                         System.out.println("[" + username + "] Received 'ready for key exchange', generating new key part...");
+                        
+                        // Discard any pending key part from previous exchange - it's invalid now
+                        // because we're starting a new key exchange with fresh parameters
+                        if (pendingKeyPart != null) {
+                            System.out.println("[" + username + "] Discarding pending key part from previous exchange");
+                            pendingKeyPart = null;
+                        }
+                        
                         // Generate new private exponent and key part for this key exchange
                         // This ensures both users use fresh exponents and calculate the same new key
                         // Both the already-connected user and newly-connecting user will regenerate
@@ -456,17 +470,6 @@ public class ChatWebSocketClient {
                             Thread.currentThread().interrupt();
                         }
                         parentHandler.sendKeyPart();
-                        
-                        // If we had a pending key part (received before we sent ours), calculate the shared key now
-                        if (pendingKeyPart != null) {
-                            System.out.println("[" + username + "] Processing pending key part now that we've sent ours");
-                            ChatKeyPart keyPartToProcess = pendingKeyPart;
-                            pendingKeyPart = null; // Clear pending key part
-                            
-                            // Calculate shared key using the stored key part
-                            BigInteger sharedKeyBigInt = keyPartToProcess.getKeypart().modPow(a, chat.getP());
-                            calculateAndStoreSharedKey(sharedKeyBigInt);
-                        }
                     } else {
                         // Regular chat message - notify callback
                         if (onMessageReceived != null) {

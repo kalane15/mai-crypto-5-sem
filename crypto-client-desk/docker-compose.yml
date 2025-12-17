@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  client-db:
+    image: postgres:15-alpine
+    container_name: crypto-client-db
+    environment:
+      POSTGRES_DB: clientdb
+      POSTGRES_USER: clientuser
+      POSTGRES_PASSWORD: clientpass
+    ports:
+      - "5434:5432"
+    volumes:
+      - client-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clientuser -d clientdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  client-db-data:
+

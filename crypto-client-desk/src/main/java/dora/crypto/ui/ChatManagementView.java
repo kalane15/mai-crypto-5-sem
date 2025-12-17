@@ -351,11 +351,13 @@ public class ChatManagementView extends VBox {
                 if (response == ButtonType.OK) {
                     apiClient.deleteChat(chat.getId())
                             .thenRun(() -> Platform.runLater(() -> {
-                                // If user is currently viewing this chat, switch to main view
+                                // If user is currently viewing this chat, delete messages and switch to main view
                                 if (app.currentChatView != null) {
                                     try {
                                         var currentChat = app.currentChatView.getChat();
                                         if (currentChat != null && currentChat.getId().equals(chat.getId())) {
+                                            // Delete messages from database before switching views
+                                            app.currentChatView.deleteChatMessages();
                                             app.showMainView();
                                         }
                                     } catch (Exception e) {

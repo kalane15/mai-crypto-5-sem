@@ -146,15 +146,26 @@ public class ChatService {
                     .build();
             sendMessage(chat.getId(), messageToCurrent);
         } else if (oldStatus == dora.server.chat.Chat.ChatStatus.CONNECTED2) {
-            // If status was already CONNECTED2, send message to the newly connecting user
-            // This handles the case where one user connects after the status is already CONNECTED2
-            System.out.println("Chat already CONNECTED2, sending 'ready for key exchange' to newly connected user: " + currentUser.getUsername());
-            var message = ChatMessage.builder()
+            // If status was already CONNECTED2, this means a user reconnected
+            // Send "ready for key exchange" to BOTH users to ensure they both regenerate parameters
+            // and calculate the same new key
+            System.out.println("Chat already CONNECTED2 (user reconnected), sending 'ready for key exchange' to both users");
+            
+            // Send to the newly connecting user
+            var messageToCurrent = ChatMessage.builder()
                     .receiver(currentUser.getUsername())
                     .sender(otherUser.getUsername())
                     .message("ready for key exchange")
                     .build();
-            sendMessage(chat.getId(), message);
+            sendMessage(chat.getId(), messageToCurrent);
+            
+            // Also send to the already-connected user so they regenerate too
+            var messageToOther = ChatMessage.builder()
+                    .receiver(otherUser.getUsername())
+                    .sender(currentUser.getUsername())
+                    .message("ready for key exchange")
+                    .build();
+            sendMessage(chat.getId(), messageToOther);
         }
     }
 

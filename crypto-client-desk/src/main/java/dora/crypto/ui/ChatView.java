@@ -8,6 +8,8 @@ import dora.crypto.shared.dto.ChatMessage;
 import dora.crypto.shared.dto.FileInfo;
 import dora.crypto.shared.dto.FileUploadResponse;
 import dora.crypto.SymmetricCipher;
+import dora.crypto.db.MessageDatabase;
+import dora.crypto.model.LocalMessage;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
@@ -29,6 +31,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 
 public class ChatView extends BorderPane {
     private final ApiClient apiClient;
@@ -57,6 +60,7 @@ public class ChatView extends BorderPane {
     private File selectedFile;
     private Path encryptedFileWithIV; // Store encrypted file path after encryption
     private Task<Path> currentFileEncryptionTask; // Changed to return Path instead of String
+    private MessageDatabase messageDatabase;
 
     public ChatView(ApiClient apiClient, Chat chat, Main app) {
         this.apiClient = apiClient;
@@ -64,8 +68,12 @@ public class ChatView extends BorderPane {
         this.app = app;
         // Reset IV state when creating new chat view (handles reconnection)
         currentIV = null;
+        // Initialize database
+        this.messageDatabase = new MessageDatabase();
         createView();
         setupWebSocket();
+        // Load messages from database
+        loadMessagesFromDatabase();
     }
 
     public Chat getChat() {
@@ -130,7 +138,8 @@ public class ChatView extends BorderPane {
             
             // Handle system messages
             if ("SYSTEM".equals(message.getSender()) && "chat deleted".equals(messageText)) {
-                // Chat was deleted, switch to main view
+                // Chat was deleted, delete messages from database and switch to main view
+                deleteChatMessages();
                 Alert alert = new Alert(Alert.AlertType.INFORMATION);
                 alert.setTitle("Chat Deleted");
                 alert.setHeaderText("Chat Deleted");
@@ -632,6 +641,10 @@ public class ChatView extends BorderPane {
     }
 
     private void addMessageToUI(String sender, String messageText, boolean isEncryptedFile, String fileId) {
+        // Save message to database (don't save system messages)
+        if (!"System".equals(sender)) {
+            saveMessageToDatabase(sender, messageText, isEncryptedFile, fileId);
+        }
         HBox messageBox = new HBox(10);
         messageBox.setPadding(new Insets(5, 10, 5, 10));
         messageBox.setAlignment(Pos.CENTER_LEFT);
@@ -1137,6 +1150,149 @@ public class ChatView extends BorderPane {
         });
 
         new Thread(downloadTask).start();
+    }
+
+    /**
+     * Save a message to the local database.
+     */
+    private void saveMessageToDatabase(String sender, String messageText, boolean isEncryptedFile, String fileId) {
+        try {
+            // Determine message type and prepare message content
+            String type;
+            String messageContent = messageText;
+            
+            if (fileId != null) {
+                type = isEncryptedFile ? "ENCRYPTED_FILE" : "FILE";
+            } else if (messageText.startsWith("[ENCRYPTED]")) {
+                type = "ENCRYPTED";
+                // Store the actual encrypted content (remove the "[ENCRYPTED] " prefix if present)
+                if (messageText.startsWith("[ENCRYPTED] ")) {
+                    messageContent = messageText.substring("[ENCRYPTED] ".length());
+                }
+            } else {
+                type = "TEXT";
+            }
+            
+            LocalMessage localMessage = LocalMessage.builder()
+                    .chatId(chat.getId())
+                    .sender(sender)
+                    .receiver(chat.getContactUsername())
+                    .message(messageContent)
+                    .type(type)
+                    .timestamp(java.time.LocalDateTime.now())
+                    .fileId(fileId)
+                    .build();
+            
+            messageDatabase.saveMessage(localMessage);
+        } catch (Exception e) {
+            System.err.println("Failed to save message to database: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Load messages from the local database and display them.
+     */
+    private void loadMessagesFromDatabase() {
+        try {
+            List<LocalMessage> messages = messageDatabase.loadMessages(chat.getId());
+            Platform.runLater(() -> {
+                for (LocalMessage msg : messages) {
+                    // Determine if it's an encrypted file based on type
+                    boolean isEncryptedFile = "ENCRYPTED_FILE".equals(msg.getType());
+                    String displayText = msg.getMessage();
+                    
+                    // Add prefix for encrypted messages if needed
+                    if ("ENCRYPTED".equals(msg.getType()) && !displayText.startsWith("[ENCRYPTED]")) {
+                        displayText = "[ENCRYPTED] " + displayText;
+                    }
+                    
+                    // Display message without saving to database (it's already in the database)
+                    displayMessageInUI(msg.getSender(), displayText, isEncryptedFile, msg.getFileId());
+                }
+            });
+        } catch (Exception e) {
+            System.err.println("Failed to load messages from database: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Display a message in the UI without saving to database.
+     * Used when loading messages from database.
+     */
+    private void displayMessageInUI(String sender, String messageText, boolean isEncryptedFile, String fileId) {
+        // This is the same as addMessageToUI but without the database save
+        // Copy the UI code from addMessageToUI
+        HBox messageBox = new HBox(10);
+        messageBox.setPadding(new Insets(5, 10, 5, 10));
+        messageBox.setAlignment(Pos.CENTER_LEFT);
+        
+        Label senderLabel = new Label(sender + ":");
+        senderLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333;");
+        
+        if (fileId != null) {
+            // File attachment message with download button
+            Label fileLabel = new Label(isEncryptedFile ? "[ENCRYPTED FILE]" : "[File Attachment]");
+            fileLabel.setStyle("-fx-text-fill: #666;");
+            
+            Button downloadButton = new Button("⬇ Download");
+            downloadButton.setStyle(
+                "-fx-background-color: #4CAF50; " +
+                "-fx-text-fill: white; " +
+                "-fx-font-weight: bold; " +
+                "-fx-padding: 8 15 8 15; " +
+                "-fx-background-radius: 5; " +
+                "-fx-cursor: hand;"
+            );
+            
+            downloadButton.setOnMouseEntered(e -> {
+                downloadButton.setStyle(
+                    "-fx-background-color: #45a049; " +
+                    "-fx-text-fill: white; " +
+                    "-fx-font-weight: bold; " +
+                    "-fx-padding: 8 15 8 15; " +
+                    "-fx-background-radius: 5; " +
+                    "-fx-cursor: hand; " +
+                    "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 5, 0, 0, 2);"
+                );
+            });
+            
+            downloadButton.setOnMouseExited(e -> {
+                downloadButton.setStyle(
+                    "-fx-background-color: #4CAF50; " +
+                    "-fx-text-fill: white; " +
+                    "-fx-font-weight: bold; " +
+                    "-fx-padding: 8 15 8 15; " +
+                    "-fx-background-radius: 5; " +
+                    "-fx-cursor: hand;"
+                );
+            });
+            
+            downloadButton.setOnAction(e -> handleFileDownload(fileId));
+            
+            messageBox.getChildren().addAll(senderLabel, fileLabel, downloadButton);
+        } else {
+            // Regular text message
+            Text messageTextNode = new Text(messageText);
+            messageTextNode.setWrappingWidth(600);
+            messageBox.getChildren().addAll(senderLabel, messageTextNode);
+        }
+        
+        messageContainer.getChildren().add(messageBox);
+    }
+
+    /**
+     * Delete all messages for this chat from the database.
+     * Called when chat is deleted.
+     */
+    public void deleteChatMessages() {
+        try {
+            messageDatabase.deleteMessagesByChatId(chat.getId());
+        } catch (Exception e) {
+            System.err.println("Failed to delete messages from database: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }
 
