@@ -124,7 +124,8 @@ public class AuthView extends VBox {
                 })
                 .exceptionally(ex -> {
                     javafx.application.Platform.runLater(() -> {
-                        statusLabel.setText("Sign in failed: " + ex.getCause().getMessage());
+                        String errorMessage = getErrorMessage(ex);
+                        statusLabel.setText("Sign in failed: " + errorMessage);
                         statusLabel.setStyle("-fx-text-fill: red;");
                     });
                     return null;
@@ -152,11 +153,86 @@ public class AuthView extends VBox {
                 })
                 .exceptionally(ex -> {
                     javafx.application.Platform.runLater(() -> {
-                        statusLabel.setText("Sign up failed: " + ex.getCause().getMessage());
+                        String errorMessage = getErrorMessage(ex);
+                        statusLabel.setText("Sign up failed: " + errorMessage);
                         statusLabel.setStyle("-fx-text-fill: red;");
                     });
                     return null;
                 });
+    }
+
+    /**
+     * Extracts user-friendly error messages from exceptions.
+     * Hides technical details like status codes and shows meaningful messages.
+     */
+    private String getErrorMessage(Throwable ex) {
+        if (ex == null) {
+            return "Unknown error occurred";
+        }
+
+        Throwable cause = ex.getCause();
+        if (cause == null) {
+            cause = ex;
+        }
+
+        String message = cause.getMessage();
+        if (message == null || message.isEmpty()) {
+            return "An error occurred. Please try again.";
+        }
+
+        // Check for specific error patterns
+        String lowerMessage = message.toLowerCase();
+        
+        // Username already exists
+        if (lowerMessage.contains("пользователь с таким именем уже существует") ||
+            lowerMessage.contains("user with such name already exists") ||
+            lowerMessage.contains("username already exists") ||
+            lowerMessage.contains("user already exists")) {
+            return "This username is already taken. Please choose a different username.";
+        }
+
+        // User not found
+        if (lowerMessage.contains("пользователь не найден") ||
+            lowerMessage.contains("user not found") ||
+            lowerMessage.contains("username not found")) {
+            return "Invalid username or password. Please check your credentials and try again.";
+        }
+
+        // Authentication/authorization errors
+        if (lowerMessage.contains("unauthorized") ||
+            lowerMessage.contains("forbidden") ||
+            lowerMessage.contains("authentication failed") ||
+            lowerMessage.contains("bad credentials")) {
+            return "Invalid username or password. Please check your credentials and try again.";
+        }
+
+        // Network/connection errors
+        if (lowerMessage.contains("connection") ||
+            lowerMessage.contains("timeout") ||
+            lowerMessage.contains("network") ||
+            lowerMessage.contains("refused")) {
+            return "Connection error. Please check your internet connection and try again.";
+        }
+
+        // Remove status codes and technical details
+        // Remove patterns like "400 - ", "500 - ", "failed: 400", etc.
+        message = message.replaceAll("\\d{3}\\s*-\\s*", "");
+        message = message.replaceAll("failed:\\s*\\d{3}", "failed");
+        message = message.replaceAll("status code:\\s*\\d{3}", "");
+        message = message.replaceAll("\\d{3}\\s*\\|", "");
+        
+        // Remove common technical prefixes
+        message = message.replaceAll("^(Sign in|Sign up|Authentication|Registration)\\s+failed:\\s*", "");
+        
+        // If message is still too technical (contains status codes or HTTP terms), provide generic message
+        if (message.matches(".*\\d{3}.*") || 
+            message.toLowerCase().contains("http") ||
+            message.toLowerCase().contains("status")) {
+            return "An error occurred. Please try again or contact support if the problem persists.";
+        }
+
+        // Return cleaned message
+        return message.trim();
     }
 }
 

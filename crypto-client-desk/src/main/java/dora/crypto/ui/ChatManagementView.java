@@ -82,6 +82,30 @@ public class ChatManagementView extends VBox {
         grid.add(new Label("Contact:"), 0, 0);
         contactComboBox = new ComboBox<>();
         contactComboBox.setPrefWidth(200);
+        // Set cell factory to display username
+        contactComboBox.setCellFactory(param -> new ListCell<Contact>() {
+            @Override
+            protected void updateItem(Contact contact, boolean empty) {
+                super.updateItem(contact, empty);
+                if (empty || contact == null) {
+                    setText(null);
+                } else {
+                    setText(contact.getUsername());
+                }
+            }
+        });
+        // Set button cell to display username when selected
+        contactComboBox.setButtonCell(new ListCell<Contact>() {
+            @Override
+            protected void updateItem(Contact contact, boolean empty) {
+                super.updateItem(contact, empty);
+                if (empty || contact == null) {
+                    setText(null);
+                } else {
+                    setText(contact.getUsername());
+                }
+            }
+        });
         grid.add(contactComboBox, 1, 0);
 
         // Algorithm selection

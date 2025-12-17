@@ -18,7 +18,7 @@ import java.util.function.Consumer;
 
 public class ChatWebSocketClient {
 
-    private final BigInteger constant;
+    private BigInteger constant;
     private byte[] key;
     private final ObjectMapper objectMapper;
 
@@ -29,10 +29,11 @@ public class ChatWebSocketClient {
     private final String url;
     private StompSessionHandler sessionHandler;
     private String username;
-    private final BigInteger a;
+    private BigInteger a; // Not final - will be regenerated on each key exchange
     private Consumer<ChatMessage> onMessageReceived;
     private Runnable onSubscriptionReady;
     private boolean subscriptionReady = false;
+    private boolean keyPartSentInThisSession = false; // Track if we've sent key part in current session
 
     public ChatWebSocketClient(String url, Chat chat, String username) {
         this.url = url + "/chat";
@@ -40,7 +41,11 @@ public class ChatWebSocketClient {
         this.username = username;
         this.objectMapper = new ObjectMapper();
         
-        // Choose 'a' based on the required key length for the algorithm
+        // Reset key to null to ensure fresh key exchange on each connection
+        this.key = null;
+        
+        // Generate new private exponent 'a' for each connection
+        // This ensures a fresh key exchange every time users connect
         this.a = generatePrivateExponent(chat.getAlgorithm(), chat.getP());
         this.constant = chat.getG().modPow(a, chat.getP());
     }
@@ -102,6 +107,25 @@ public class ChatWebSocketClient {
      */
     private int getRequiredKeyLengthBytes(String algorithm) {
         return getRequiredKeyLengthBits(algorithm) / 8;
+    }
+
+    /**
+     * Regenerates the private exponent 'a' and recalculates constant = g^a mod p.
+     * This is called when "ready for key exchange" is received to ensure
+     * both users use fresh exponents for the new key exchange.
+     */
+    private void regenerateKeyExchangeParameters() {
+        // Reset key to null to ensure fresh key calculation
+        key = null;
+        
+        // Generate new private exponent 'a' for this key exchange
+        // This ensures both users use fresh exponents for the new key exchange session
+        this.a = generatePrivateExponent(chat.getAlgorithm(), chat.getP());
+        
+        // Recalculate constant = g^a mod p with new 'a'
+        this.constant = chat.getG().modPow(a, chat.getP());
+        
+        System.out.println("[" + username + "] Regenerated key exchange parameters - new private exponent 'a' and constant (g^a mod p): " + constant);
     }
 
     public void setOnMessageReceived(Consumer<ChatMessage> callback) {
@@ -187,6 +211,12 @@ public class ChatWebSocketClient {
         public void afterConnected(StompSession session, StompHeaders connectedHeaders) {
             System.out.println("Connected to WebSocket server");
             this.session = session;
+            
+            // Reset key on each new connection to ensure fresh key exchange
+            key = null;
+            keyPartSentInThisSession = false; // Reset flag for new connection
+            System.out.println("[" + username + "] Key reset for new connection - will recalculate on key exchange");
+            
             // Subscribe to chat-specific topic: /topic/messages/{chatId}/{username}
             String topic = "/topic/messages/" + chat.getId() + "/" + username;
             System.out.println("Subscribing to topic: " + topic);
@@ -236,6 +266,7 @@ public class ChatWebSocketClient {
                              ", KeyPart (g^a mod p): " + constant);
             if (session != null && session.isConnected()) {
                 session.send("/app/sendKeyPart", keypart);
+                keyPartSentInThisSession = true; // Mark that we've sent our key part
             } else {
                 System.err.println("[" + username + "] Cannot send key part - session not connected");
             }
@@ -314,42 +345,64 @@ public class ChatWebSocketClient {
                 System.out.println("[" + username + "] Received ChatKeyPart - Receiver: " + chatKeyPart.getReceiver() + 
                                  ", Sender: " + chatKeyPart.getSender() + 
                                  ", KeyPart: " + chatKeyPart.getKeypart());
-                if (key == null) {
-                    // Verify sender is the contact (safety check)
-                    if (Objects.equals(chatKeyPart.getSender(), chat.getContactUsername())) {
-                        // Calculate shared key: g^(a*b) mod p
-                        BigInteger sharedKeyBigInt = chatKeyPart.getKeypart().modPow(a, chat.getP());
-                        
-                        // Extract only the required number of bytes from the shared key
-                        int requiredKeyBytes = getRequiredKeyLengthBytes(chat.getAlgorithm());
-                        byte[] fullKeyBytes = sharedKeyBigInt.toByteArray();
-                        
-                        // Handle sign bit (BigInteger.toByteArray() may include sign bit)
-                        if (fullKeyBytes[0] == 0 && fullKeyBytes.length > requiredKeyBytes) {
-                            // Remove leading zero byte
-                            byte[] temp = new byte[fullKeyBytes.length - 1];
-                            System.arraycopy(fullKeyBytes, 1, temp, 0, temp.length);
-                            fullKeyBytes = temp;
+                
+                // Always recalculate key when receiving a key part (handles reconnection)
+                // Verify sender is the contact (safety check)
+                if (Objects.equals(chatKeyPart.getSender(), chat.getContactUsername())) {
+                    // If we haven't sent our key part yet in this session, we need to regenerate
+                    // and send it FIRST before calculating the shared key. This ensures both users
+                    // are using the same key exchange session and calculate the same shared key.
+                    // This handles the case where the other user connected and we didn't receive
+                    // "ready for key exchange" (e.g., when status was already CONNECTED2)
+                    if (!keyPartSentInThisSession) {
+                        System.out.println("[" + username + "] Haven't sent key part yet in this session, regenerating and sending first...");
+                        regenerateKeyExchangeParameters();
+                        if (parentHandler.session != null && parentHandler.session.isConnected() && subscriptionReady) {
+                            parentHandler.sendKeyPart();
                         }
-                        
-                        // Extract the required number of bytes
-                        if (fullKeyBytes.length >= requiredKeyBytes) {
-                            // Take the last requiredKeyBytes bytes (most significant)
-                            key = new byte[requiredKeyBytes];
-                            System.arraycopy(fullKeyBytes, fullKeyBytes.length - requiredKeyBytes, key, 0, requiredKeyBytes);
-                        } else {
-                            // If key is shorter than required, pad with zeros at the beginning
-                            key = new byte[requiredKeyBytes];
-                            System.arraycopy(fullKeyBytes, 0, key, requiredKeyBytes - fullKeyBytes.length, fullKeyBytes.length);
-                        }
-                        
-                        System.out.println("[" + username + "] Calculated shared key (length: " + key.length + " bytes): " + java.util.Arrays.toString(key));
+                    }
+                    
+                    // Calculate shared key: g^(a*b) mod p
+                    // User A (with exponent 'a') calculates: (received g^b)^a = g^(a*b) mod p
+                    // User B (with exponent 'b') calculates: (received g^a)^b = g^(a*b) mod p
+                    // Both produce the same shared key: g^(a*b) mod p
+                    // Note: 'a' here is the current user's private exponent, and the received
+                    // keypart is the other user's g^b (or g^a from their perspective)
+                    BigInteger sharedKeyBigInt = chatKeyPart.getKeypart().modPow(a, chat.getP());
+                    
+                    // Extract only the required number of bytes from the shared key
+                    int requiredKeyBytes = getRequiredKeyLengthBytes(chat.getAlgorithm());
+                    byte[] fullKeyBytes = sharedKeyBigInt.toByteArray();
+                    
+                    // Handle sign bit (BigInteger.toByteArray() may include sign bit)
+                    if (fullKeyBytes[0] == 0 && fullKeyBytes.length > requiredKeyBytes) {
+                        // Remove leading zero byte
+                        byte[] temp = new byte[fullKeyBytes.length - 1];
+                        System.arraycopy(fullKeyBytes, 1, temp, 0, temp.length);
+                        fullKeyBytes = temp;
+                    }
+                    
+                    // Extract the required number of bytes
+                    if (fullKeyBytes.length >= requiredKeyBytes) {
+                        // Take the last requiredKeyBytes bytes (most significant)
+                        key = new byte[requiredKeyBytes];
+                        System.arraycopy(fullKeyBytes, fullKeyBytes.length - requiredKeyBytes, key, 0, requiredKeyBytes);
                     } else {
-                        System.out.println("[" + username + "] Ignoring key part from unexpected sender: " + chatKeyPart.getSender() + 
-                                         " (expected: " + chat.getContactUsername() + ")");
+                        // If key is shorter than required, pad with zeros at the beginning
+                        key = new byte[requiredKeyBytes];
+                        System.arraycopy(fullKeyBytes, 0, key, requiredKeyBytes - fullKeyBytes.length, fullKeyBytes.length);
+                    }
+                    
+                    System.out.println("[" + username + "] Calculated shared key (length: " + key.length + " bytes)");
+                    System.out.println("[" + username + "] Key calculation: (received g^b)^a = g^(a*b) mod p, where a=" + a + ", received keypart=" + chatKeyPart.getKeypart());
+                    // Log first few bytes for debugging (don't log full key for security)
+                    if (key.length >= 4) {
+                        System.out.println("[" + username + "] First 4 bytes of calculated key: [" + 
+                            (key[0] & 0xff) + ", " + (key[1] & 0xff) + ", " + (key[2] & 0xff) + ", " + (key[3] & 0xff) + "]");
                     }
                 } else {
-                    System.out.println("[" + username + "] Key already calculated, ignoring duplicate key part");
+                    System.out.println("[" + username + "] Ignoring key part from unexpected sender: " + chatKeyPart.getSender() + 
+                                     " (expected: " + chat.getContactUsername() + ")");
                 }
                 return;
             }
@@ -375,7 +428,19 @@ public class ChatWebSocketClient {
                 // Verify sender is the contact (safety check)
                 if (Objects.equals(chatMessage.getSender(), chat.getContactUsername())) {
                     if (Objects.equals(chatMessage.getMessage(), "ready for key exchange")) {
-                        System.out.println("[" + username + "] Received 'ready for key exchange', sending key part...");
+                        System.out.println("[" + username + "] Received 'ready for key exchange', generating new key part...");
+                        // Generate new private exponent and key part for this key exchange
+                        // This ensures both users use fresh exponents and calculate the same new key
+                        // Both the already-connected user and newly-connecting user will regenerate
+                        // to ensure they're using the same key exchange session
+                        regenerateKeyExchangeParameters();
+                        // Small delay to ensure both users have regenerated before sending
+                        // This helps with synchronization
+                        try {
+                            Thread.sleep(50);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
                         parentHandler.sendKeyPart();
                     } else {
                         // Regular chat message - notify callback

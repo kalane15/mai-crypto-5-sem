@@ -6,13 +6,18 @@ import dora.crypto.shared.dto.Chat;
 import dora.crypto.shared.dto.ChatRequest;
 import dora.crypto.shared.dto.Contact;
 import dora.crypto.shared.dto.ContactRequest;
+import dora.crypto.shared.dto.FileInfo;
+import dora.crypto.shared.dto.FileUploadResponse;
 import dora.crypto.shared.dto.SignInRequest;
 import dora.crypto.shared.dto.SignUpRequest;
 
+import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -70,9 +75,30 @@ public class ApiClient {
     }
 
     /**
-     * Handles HTTP response and clears token if unauthorized (401) or forbidden (403).
-     * Returns true if the response indicates the token should be cleared.
+     * Extracts error message from response body, handling JSON and plain text responses.
      */
+    private String extractErrorMessage(String responseBody) {
+        if (responseBody == null || responseBody.trim().isEmpty()) {
+            return null;
+        }
+        
+        try {
+            // Try to parse as JSON and extract message field
+            var jsonNode = objectMapper.readTree(responseBody);
+            if (jsonNode.has("message")) {
+                return jsonNode.get("message").asText();
+            }
+            if (jsonNode.has("error")) {
+                return jsonNode.get("error").asText();
+            }
+            // If it's JSON but no message field, return the whole body as string
+            return responseBody;
+        } catch (Exception e) {
+            // Not JSON, return as-is (might be plain text error message)
+            return responseBody;
+        }
+    }
+
     private boolean handleUnauthorized(int statusCode, String errorMessage) {
         if (statusCode == 401 || statusCode == 403) {
             System.err.println("Received " + statusCode + " - clearing invalid token");
@@ -114,7 +140,9 @@ public class ApiClient {
                                 throw new RuntimeException("Failed to parse response", e);
                             }
                         } else {
-                            throw new RuntimeException("Sign up failed: " + response.statusCode() + " - " + response.body());
+                            // Extract error message from response body if available
+                            String errorMessage = extractErrorMessage(response.body());
+                            throw new RuntimeException(errorMessage != null ? errorMessage : "Sign up failed");
                         }
                     });
         } catch (Exception e) {
@@ -144,7 +172,9 @@ public class ApiClient {
                                 throw new RuntimeException("Failed to parse response", e);
                             }
                         } else {
-                            throw new RuntimeException("Sign in failed: " + response.statusCode() + " - " + response.body());
+                            // Extract error message from response body if available
+                            String errorMessage = extractErrorMessage(response.body());
+                            throw new RuntimeException(errorMessage != null ? errorMessage : "Sign in failed");
                         }
                     });
         } catch (Exception e) {
@@ -364,6 +394,125 @@ public class ApiClient {
                         return null;
                     } else {
                         throw new RuntimeException("Delete chat failed: " + response.statusCode() + " - " + response.body());
+                    }
+                });
+    }
+
+    // File operations
+    public CompletableFuture<FileUploadResponse> uploadFile(File file) {
+        try {
+            // Read file into byte array
+            byte[] fileBytes = Files.readAllBytes(file.toPath());
+            String fileName = file.getName();
+            
+            // Create multipart form data
+            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
+            String CRLF = "\r\n";
+            
+            StringBuilder formData = new StringBuilder();
+            formData.append("--").append(boundary).append(CRLF);
+            formData.append("Content-Disposition: form-data; name=\"file\"; filename=\"").append(fileName).append("\"").append(CRLF);
+            formData.append("Content-Type: application/octet-stream").append(CRLF);
+            formData.append(CRLF);
+            
+            // Combine form data header and file content
+            byte[] headerBytes = formData.toString().getBytes("UTF-8");
+            byte[] footerBytes = (CRLF + "--" + boundary + "--" + CRLF).getBytes("UTF-8");
+            
+            byte[] requestBody = new byte[headerBytes.length + fileBytes.length + footerBytes.length];
+            System.arraycopy(headerBytes, 0, requestBody, 0, headerBytes.length);
+            System.arraycopy(fileBytes, 0, requestBody, headerBytes.length, fileBytes.length);
+            System.arraycopy(footerBytes, 0, requestBody, headerBytes.length + fileBytes.length, footerBytes.length);
+
+            HttpRequest httpRequest = createRequestBuilder("/files/upload")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(requestBody))
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .build();
+
+            return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
+                    .thenApply(response -> {
+                        if (handleUnauthorized(response.statusCode(), response.body())) {
+                            throw new RuntimeException("Unauthorized - please sign in again");
+                        }
+                        if (response.statusCode() == 200) {
+                            try {
+                                return objectMapper.readValue(response.body(), FileUploadResponse.class);
+                            } catch (Exception e) {
+                                throw new RuntimeException("Failed to parse file upload response", e);
+                            }
+                        } else {
+                            throw new RuntimeException("File upload failed: " + response.statusCode() + " - " + response.body());
+                        }
+                    });
+        } catch (IOException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    public CompletableFuture<File> downloadFile(String fileId, File outputFile) {
+        HttpRequest httpRequest = createRequestBuilder("/files/" + fileId)
+                .GET()
+                .build();
+
+        return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofByteArray())
+                .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), null)) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
+                    if (response.statusCode() == 200) {
+                        try {
+                            // Ensure parent directory exists
+                            if (outputFile.getParentFile() != null && !outputFile.getParentFile().exists()) {
+                                outputFile.getParentFile().mkdirs();
+                            }
+                            // Write bytes to file
+                            Files.write(outputFile.toPath(), response.body());
+                            return outputFile;
+                        } catch (IOException e) {
+                            throw new RuntimeException("Failed to write file: " + e.getMessage(), e);
+                        }
+                    } else {
+                        throw new RuntimeException("File download failed: " + response.statusCode());
+                    }
+                });
+    }
+
+    public CompletableFuture<byte[]> downloadFileBytes(String fileId) {
+        HttpRequest httpRequest = createRequestBuilder("/files/" + fileId)
+                .GET()
+                .build();
+
+        return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofByteArray())
+                .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), null)) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
+                    if (response.statusCode() == 200) {
+                        return response.body();
+                    } else {
+                        throw new RuntimeException("File download failed: " + response.statusCode());
+                    }
+                });
+    }
+
+    public CompletableFuture<FileInfo> getFileInfo(String fileId) {
+        HttpRequest httpRequest = createRequestBuilder("/files/" + fileId + "/info")
+                .GET()
+                .build();
+
+        return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> {
+                    if (handleUnauthorized(response.statusCode(), response.body())) {
+                        throw new RuntimeException("Unauthorized - please sign in again");
+                    }
+                    if (response.statusCode() == 200) {
+                        try {
+                            return objectMapper.readValue(response.body(), FileInfo.class);
+                        } catch (Exception e) {
+                            throw new RuntimeException("Failed to parse file info", e);
+                        }
+                    } else {
+                        throw new RuntimeException("Get file info failed: " + response.statusCode() + " - " + response.body());
                     }
                 });
     }

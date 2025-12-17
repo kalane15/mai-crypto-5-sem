@@ -5,6 +5,8 @@ import dora.crypto.Main;
 import dora.crypto.api.ApiClient;
 import dora.crypto.shared.dto.Chat;
 import dora.crypto.shared.dto.ChatMessage;
+import dora.crypto.shared.dto.FileInfo;
+import dora.crypto.shared.dto.FileUploadResponse;
 import dora.crypto.SymmetricCipher;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
@@ -14,7 +16,17 @@ import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.scene.text.Text;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.HexFormat;
 
@@ -22,7 +34,8 @@ public class ChatView extends BorderPane {
     private final ApiClient apiClient;
     private final Chat chat;
     private final Main app;
-    private TextArea messageArea;
+    private VBox messageContainer;
+    private ScrollPane messageScrollPane;
     private TextField messageInput;
     private Button sendButton;
     private Button encryptButton;
@@ -35,11 +48,22 @@ public class ChatView extends BorderPane {
     private Button generateIVButton;
     private Label ivLabel;
     private byte[] currentIV;
+    private Button attachFileButton;
+    private Button encryptFileButton;
+    private Button sendFileButton;
+    private Button cancelFileEncryptionButton;
+    private ProgressBar fileEncryptionProgress;
+    private Label fileStatusLabel;
+    private File selectedFile;
+    private Path encryptedFileWithIV; // Store encrypted file path after encryption
+    private Task<Path> currentFileEncryptionTask; // Changed to return Path instead of String
 
     public ChatView(ApiClient apiClient, Chat chat, Main app) {
         this.apiClient = apiClient;
         this.chat = chat;
         this.app = app;
+        // Reset IV state when creating new chat view (handles reconnection)
+        currentIV = null;
         createView();
         setupWebSocket();
     }
@@ -54,11 +78,13 @@ public class ChatView extends BorderPane {
             app.socket.setOnMessageReceived(this::onMessageReceived);
             // Clear the placeholder message once connected
             Platform.runLater(() -> {
-                messageArea.clear();
+                messageContainer.getChildren().clear();
                 if (app.socket.isConnected()) {
-                    messageArea.appendText("Chat connected. You can now send messages.\n");
+                    addMessageToUI("System", "Chat connected. You can now send messages.", false, null);
+                    // Reset IV when connection is established (handles reconnection)
+                    resetIVOnConnection();
                 } else {
-                    messageArea.appendText("Connecting to chat...\n");
+                    addMessageToUI("System", "Connecting to chat...", false, null);
                 }
             });
         } else {
@@ -69,6 +95,33 @@ public class ChatView extends BorderPane {
                 pause.play();
             });
         }
+    }
+
+    /**
+     * Resets IV when connection is established or key is available.
+     * This ensures that on reconnection, we don't use stale IV state.
+     */
+    private void resetIVOnConnection() {
+        // Reset IV to ensure fresh state on reconnection
+        currentIV = null;
+        ivInputField.clear();
+        ivLabel.setText("");
+        ivLabel.setStyle("-fx-font-size: 10px; -fx-text-fill: gray;");
+        
+        // Monitor for key establishment and reset IV when key becomes available
+        // This handles the case where key exchange happens after connection
+        javafx.animation.PauseTransition checkKey = new javafx.animation.PauseTransition(javafx.util.Duration.millis(1000));
+        checkKey.setOnFinished(e -> {
+            if (app.socket != null && app.socket.getKey() != null) {
+                // Key is now available, ensure IV is reset
+                if (currentIV != null) {
+                    currentIV = null;
+                    ivInputField.clear();
+                    ivLabel.setText("");
+                }
+            }
+        });
+        checkKey.play();
     }
 
     private void onMessageReceived(ChatMessage message) {
@@ -87,10 +140,13 @@ public class ChatView extends BorderPane {
                 return;
             }
             
-            String displayText;
-            
+            // Check if message is a file link
+            if (messageText.startsWith("FILE:")) {
+                String fileId = messageText.substring("FILE:".length()).trim();
+                addMessageToUI(message.getSender(), "[File Attachment]", false, fileId);
+            }
             // Check if message is encrypted
-            if (messageText.startsWith("ENCRYPTED:")) {
+            else if (messageText.startsWith("ENCRYPTED:")) {
                 try {
                     // Decrypt the message
                     String base64Data = messageText.substring("ENCRYPTED:".length());
@@ -99,7 +155,7 @@ public class ChatView extends BorderPane {
                     // Get block size to determine IV size
                     byte[] key = app.socket.getKey();
                     if (key == null) {
-                        displayText = message.getSender() + ": [Encrypted - Key not available]\n";
+                        addMessageToUI(message.getSender(), "[Encrypted - Key not available]", false, null);
                     } else {
                         dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
                         int blockSize = blockCipher.blockSize();
@@ -121,19 +177,22 @@ public class ChatView extends BorderPane {
                         
                         byte[] decrypted = cipher.decrypt(encrypted);
                         String decryptedMessage = new String(decrypted, "UTF-8");
-                        displayText = message.getSender() + ": [ENCRYPTED] " + decryptedMessage + "\n";
+                        
+                        // Check if decrypted message is a file link
+                        if (decryptedMessage.startsWith("FILE:")) {
+                            String fileId = decryptedMessage.substring("FILE:".length()).trim();
+                            addMessageToUI(message.getSender(), "[ENCRYPTED FILE]", true, fileId);
+                        } else {
+                            addMessageToUI(message.getSender(), "[ENCRYPTED] " + decryptedMessage, false, null);
+                        }
                     }
                 } catch (Exception e) {
-                    displayText = message.getSender() + ": [Failed to decrypt: " + e.getMessage() + "]\n";
+                    addMessageToUI(message.getSender(), "[Failed to decrypt: " + e.getMessage() + "]", false, null);
                 }
             } else {
                 // Regular unencrypted message
-                displayText = message.getSender() + ": " + messageText + "\n";
+                addMessageToUI(message.getSender(), messageText, false, null);
             }
-            
-            messageArea.appendText(displayText);
-            // Auto-scroll to bottom
-            messageArea.setScrollTop(Double.MAX_VALUE);
         });
     }
 
@@ -154,12 +213,23 @@ public class ChatView extends BorderPane {
         setTop(topBox);
 
         // Center section with message area
-        messageArea = new TextArea();
-        messageArea.setEditable(false);
-        messageArea.setWrapText(true);
-        messageArea.setPrefRowCount(20);
-        messageArea.setStyle("-fx-font-family: monospace;");
-        setCenter(messageArea);
+        messageContainer = new VBox(5);
+        messageContainer.setPadding(new Insets(10));
+        messageContainer.setStyle("-fx-background-color: white;");
+        
+        messageScrollPane = new ScrollPane(messageContainer);
+        messageScrollPane.setFitToWidth(true);
+        messageScrollPane.setFitToHeight(true);
+        messageScrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        messageScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        messageScrollPane.setStyle("-fx-background: white;");
+        
+        // Auto-scroll to bottom when content changes
+        messageContainer.heightProperty().addListener((obs, oldVal, newVal) -> {
+            messageScrollPane.setVvalue(1.0);
+        });
+        
+        setCenter(messageScrollPane);
 
         // Bottom section with message input and buttons
         VBox bottomBox = new VBox(5);
@@ -183,11 +253,36 @@ public class ChatView extends BorderPane {
         cancelEncryptButton.setDisable(true);
         cancelEncryptButton.setOnAction(e -> handleCancelEncryption());
 
+        attachFileButton = new Button("Attach File");
+        attachFileButton.setOnAction(e -> handleAttachFile());
+
+        encryptFileButton = new Button("Encrypt File");
+        encryptFileButton.setDisable(true);
+        encryptFileButton.setOnAction(e -> handleEncryptFile());
+
+        sendFileButton = new Button("Send File");
+        sendFileButton.setDisable(true);
+        sendFileButton.setOnAction(e -> handleSendFile());
+
+        cancelFileEncryptionButton = new Button("Cancel");
+        cancelFileEncryptionButton.setDisable(true);
+        cancelFileEncryptionButton.setOnAction(e -> handleCancelFileEncryption());
+
         encryptionProgress = new ProgressIndicator();
         encryptionProgress.setVisible(false);
         encryptionProgress.setPrefSize(20, 20);
 
-        inputBox.getChildren().addAll(messageLabel, messageInput, sendButton, encryptButton, cancelEncryptButton, encryptionProgress);
+        fileEncryptionProgress = new ProgressBar();
+        fileEncryptionProgress.setVisible(false);
+        fileEncryptionProgress.setPrefWidth(200);
+        fileEncryptionProgress.setProgress(0);
+
+        fileStatusLabel = new Label();
+        fileStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #666;");
+        fileStatusLabel.setVisible(false);
+
+        inputBox.getChildren().addAll(messageLabel, messageInput, sendButton, encryptButton, attachFileButton, 
+            encryptFileButton, sendFileButton, cancelFileEncryptionButton, encryptionProgress);
 
         // IV management section
         HBox ivBox = new HBox(10);
@@ -210,11 +305,17 @@ public class ChatView extends BorderPane {
 
         ivBox.getChildren().addAll(ivLabelText, ivInputField, generateIVButton, ivLabel);
 
-        bottomBox.getChildren().addAll(inputBox, ivBox);
+        // File encryption progress section
+        HBox fileProgressBox = new HBox(10);
+        fileProgressBox.setAlignment(Pos.CENTER_LEFT);
+        fileProgressBox.setPadding(new Insets(5, 0, 0, 0));
+        fileProgressBox.getChildren().addAll(fileEncryptionProgress, fileStatusLabel);
+
+        bottomBox.getChildren().addAll(inputBox, ivBox, fileProgressBox);
         setBottom(bottomBox);
 
         // Add placeholder message
-        messageArea.appendText("Chat connected. Messages will appear here.\n");
+        addMessageToUI("System", "Chat connected. Messages will appear here.", false, null);
     }
 
     private void updateChatInfo() {
@@ -235,8 +336,7 @@ public class ChatView extends BorderPane {
         // Send message via WebSocket
         if (app.socket != null && app.socket.isConnected()) {
             // Display sent message immediately
-            messageArea.appendText("You: " + message + "\n");
-            messageArea.setScrollTop(Double.MAX_VALUE);
+            addMessageToUI("You", message, false, null);
             
             // Send via WebSocket
             app.socket.sendMessage(message);
@@ -285,26 +385,26 @@ public class ChatView extends BorderPane {
                 updateMessage("Encrypting message...");
                 
                 byte[] key = app.socket.getKey();
+                if (key == null) {
+                    throw new IllegalStateException("Encryption key not available. Please wait for key exchange to complete.");
+                }
+                
                 byte[] messageBytes = message.getBytes("UTF-8");
                 
                 // Create block cipher to determine block size for IV
                 dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
                 int blockSize = blockCipher.blockSize();
                 
-                // Use stored IV or generate new one
-                byte[] iv;
-                if (currentIV != null && currentIV.length == blockSize) {
-                    iv = currentIV.clone();
-                } else {
-                    // Generate new IV if stored one is invalid or missing
-                    iv = EncryptionUtil.generateIV(blockSize);
-                    // Update stored IV
-                    final byte[] finalIV = iv.clone();
-                    Platform.runLater(() -> {
-                        currentIV = finalIV;
-                        updateIVDisplay();
-                    });
-                }
+                // Always generate a new IV for each encryption to avoid padding errors on reconnection
+                // This ensures that each encryption uses a fresh IV, preventing issues when reconnecting
+                byte[] iv = EncryptionUtil.generateIV(blockSize);
+                
+                // Update stored IV for display purposes
+                final byte[] finalIV = iv.clone();
+                Platform.runLater(() -> {
+                    currentIV = finalIV;
+                    updateIVDisplay();
+                });
                 
                 // Create cipher
                 SymmetricCipher cipher = EncryptionUtil.createCipher(
@@ -345,8 +445,7 @@ public class ChatView extends BorderPane {
             String encryptedMessage = currentEncryptionTask.getValue();
             if (encryptedMessage != null) {
                 // Display encrypted message indicator
-                messageArea.appendText("You: [ENCRYPTED] " + message + "\n");
-                messageArea.setScrollTop(Double.MAX_VALUE);
+                addMessageToUI("You", "[ENCRYPTED] " + message, false, null);
                 
                 // Send encrypted message
                 if (app.socket != null && app.socket.isConnected()) {
@@ -371,7 +470,7 @@ public class ChatView extends BorderPane {
 
         currentEncryptionTask.setOnCancelled(e -> {
             Platform.runLater(() -> {
-                messageArea.appendText("Encryption cancelled.\n");
+                addMessageToUI("System", "Encryption cancelled.", false, null);
                 resetEncryptionUI();
             });
         });
@@ -482,6 +581,101 @@ public class ChatView extends BorderPane {
         ivInputField.setText(hexIV);
     }
 
+    private void addMessageToUI(String sender, String messageText, boolean isEncryptedFile, String fileId) {
+        HBox messageBox = new HBox(10);
+        messageBox.setPadding(new Insets(5, 10, 5, 10));
+        messageBox.setAlignment(Pos.CENTER_LEFT);
+        
+        Label senderLabel = new Label(sender + ":");
+        senderLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333;");
+        
+        if (fileId != null) {
+            // File attachment message with download button
+            Label fileLabel = new Label(isEncryptedFile ? "[ENCRYPTED FILE]" : "[File Attachment]");
+            fileLabel.setStyle("-fx-text-fill: #666;");
+            
+            Button downloadButton = new Button("⬇ Download");
+            downloadButton.setStyle(
+                "-fx-background-color: #4CAF50; " +
+                "-fx-text-fill: white; " +
+                "-fx-font-weight: bold; " +
+                "-fx-padding: 8 15 8 15; " +
+                "-fx-background-radius: 5; " +
+                "-fx-cursor: hand;"
+            );
+            
+            // Hover effect
+            downloadButton.setOnMouseEntered(e -> {
+                downloadButton.setStyle(
+                    "-fx-background-color: #45a049; " +
+                    "-fx-text-fill: white; " +
+                    "-fx-font-weight: bold; " +
+                    "-fx-padding: 8 15 8 15; " +
+                    "-fx-background-radius: 5; " +
+                    "-fx-cursor: hand; " +
+                    "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 5, 0, 0, 2);"
+                );
+            });
+            
+            downloadButton.setOnMouseExited(e -> {
+                downloadButton.setStyle(
+                    "-fx-background-color: #4CAF50; " +
+                    "-fx-text-fill: white; " +
+                    "-fx-font-weight: bold; " +
+                    "-fx-padding: 8 15 8 15; " +
+                    "-fx-background-radius: 5; " +
+                    "-fx-cursor: hand;"
+                );
+            });
+            
+            // Click effect
+            downloadButton.setOnMousePressed(e -> {
+                downloadButton.setStyle(
+                    "-fx-background-color: #3d8b40; " +
+                    "-fx-text-fill: white; " +
+                    "-fx-font-weight: bold; " +
+                    "-fx-padding: 8 15 8 15; " +
+                    "-fx-background-radius: 5; " +
+                    "-fx-cursor: hand; " +
+                    "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.2), 3, 0, 0, 1);"
+                );
+            });
+            
+            downloadButton.setOnMouseReleased(e -> {
+                downloadButton.setStyle(
+                    "-fx-background-color: #45a049; " +
+                    "-fx-text-fill: white; " +
+                    "-fx-font-weight: bold; " +
+                    "-fx-padding: 8 15 8 15; " +
+                    "-fx-background-radius: 5; " +
+                    "-fx-cursor: hand; " +
+                    "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 5, 0, 0, 2);"
+                );
+            });
+            
+            downloadButton.setOnAction(e -> handleFileDownload(fileId));
+            
+            Label fileIdLabel = new Label("(" + fileId.substring(0, 8) + "...)");
+            fileIdLabel.setStyle("-fx-text-fill: #999; -fx-font-size: 10px;");
+            
+            messageBox.getChildren().addAll(senderLabel, fileLabel, downloadButton, fileIdLabel);
+        } else {
+            // Regular text message
+            Text messageLabel = new Text(messageText);
+            messageLabel.setWrappingWidth(600);
+            messageLabel.setStyle("-fx-font-family: monospace; -fx-fill: #333;");
+            
+            messageBox.getChildren().addAll(senderLabel, messageLabel);
+        }
+        
+        messageContainer.getChildren().add(messageBox);
+        
+        // Auto-scroll to bottom
+        Platform.runLater(() -> {
+            messageScrollPane.setVvalue(1.0);
+        });
+    }
+
     private void handleDisconnect() {
         apiClient.disconnectFromChat(chat.getId())
                 .thenRun(() -> {
@@ -497,6 +691,403 @@ public class ChatView extends BorderPane {
                     });
                     return null;
                 });
+    }
+
+    private void handleAttachFile() {
+        // Check if key is available
+        if (app.socket == null || app.socket.getKey() == null) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setContentText("Encryption key not available. Please wait for key exchange to complete.");
+            alert.show();
+            return;
+        }
+
+        // Open file chooser
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select File to Attach");
+        Stage stage = (Stage) getScene().getWindow();
+        File file = fileChooser.showOpenDialog(stage);
+
+        if (file == null) {
+            return; // User cancelled
+        }
+
+        // Store selected file
+        selectedFile = file;
+        
+        // Update UI
+        encryptFileButton.setDisable(false);
+        fileStatusLabel.setText("File selected: " + file.getName() + " (" + formatFileSize(file.length()) + ")");
+        fileStatusLabel.setVisible(true);
+        fileEncryptionProgress.setVisible(false);
+        fileEncryptionProgress.setProgress(0);
+        cancelFileEncryptionButton.setDisable(true);
+    }
+
+    private void handleEncryptFile() {
+        if (selectedFile == null) {
+            return;
+        }
+
+        // Check if key is available
+        if (app.socket == null || app.socket.getKey() == null) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setContentText("Encryption key not available. Please wait for key exchange to complete.");
+            alert.show();
+            return;
+        }
+
+        // Check if already encrypting
+        if (currentFileEncryptionTask != null && !currentFileEncryptionTask.isDone()) {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+            alert.setContentText("File encryption already in progress. Please wait or cancel.");
+            alert.show();
+            return;
+        }
+
+        // Disable buttons and show progress
+        attachFileButton.setDisable(true);
+        encryptFileButton.setDisable(true);
+        cancelFileEncryptionButton.setDisable(false);
+        fileEncryptionProgress.setVisible(true);
+        fileEncryptionProgress.setProgress(-1); // Indeterminate progress
+        fileStatusLabel.setText("Encrypting file...");
+
+        // Create task for file encryption only (no upload)
+        currentFileEncryptionTask = new Task<Path>() {
+            @Override
+            protected Path call() throws Exception {
+                updateProgress(-1, 1); // Indeterminate
+                updateMessage("Encrypting file...");
+
+                byte[] key = app.socket.getKey();
+                dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
+                int blockSize = blockCipher.blockSize();
+
+                // Generate IV for file encryption
+                byte[] iv = EncryptionUtil.generateIV(blockSize);
+
+                // Create temporary encrypted file
+                Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"));
+                Path tempEncryptedFile = tempDir.resolve("encrypted_" + System.currentTimeMillis() + "_" + selectedFile.getName());
+
+                // Encrypt file
+                SymmetricCipher cipher = EncryptionUtil.createCipher(
+                    chat.getAlgorithm(),
+                    chat.getMode(),
+                    chat.getPadding(),
+                    key,
+                    iv
+                );
+
+                updateMessage("Encrypting file...");
+                
+                // Check for cancellation
+                if (isCancelled()) {
+                    return null;
+                }
+                
+                cipher.encryptFile(selectedFile.toPath(), tempEncryptedFile);
+
+                // Check for cancellation again
+                if (isCancelled()) {
+                    Files.deleteIfExists(tempEncryptedFile);
+                    return null;
+                }
+
+                // Prepend IV to encrypted file (like we do with messages)
+                updateMessage("Preparing file...");
+                Path encryptedFile = tempDir.resolve("encrypted_with_iv_" + System.currentTimeMillis() + "_" + selectedFile.getName());
+                try (FileOutputStream fos = new FileOutputStream(encryptedFile.toFile());
+                     FileInputStream fis = new FileInputStream(tempEncryptedFile.toFile())) {
+                    // Write IV first
+                    fos.write(iv);
+                    // Then write encrypted data
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = fis.read(buffer)) != -1) {
+                        if (isCancelled()) {
+                            Files.deleteIfExists(tempEncryptedFile);
+                            Files.deleteIfExists(encryptedFile);
+                            return null;
+                        }
+                        fos.write(buffer, 0, bytesRead);
+                    }
+                }
+                Files.deleteIfExists(tempEncryptedFile);
+
+                updateProgress(1.0, 1.0); // 100% progress
+                return encryptedFile; // Return path to encrypted file, don't upload yet
+            }
+        };
+
+        // Bind progress bar to task progress
+        fileEncryptionProgress.progressProperty().bind(currentFileEncryptionTask.progressProperty());
+
+        currentFileEncryptionTask.setOnSucceeded(e -> {
+            Path encryptedFile = currentFileEncryptionTask.getValue();
+            if (encryptedFile != null) {
+                // Store encrypted file path for later sending
+                encryptedFileWithIV = encryptedFile;
+                fileStatusLabel.setText("File encrypted successfully! Click 'Send File' to upload and send.");
+                fileStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: green;");
+                // Enable send button
+                sendFileButton.setDisable(false);
+                encryptFileButton.setDisable(true);
+                cancelFileEncryptionButton.setDisable(true);
+            }
+            // Don't reset UI yet - wait for user to click Send
+            fileEncryptionProgress.setVisible(false);
+            fileEncryptionProgress.progressProperty().unbind();
+            fileEncryptionProgress.setProgress(0);
+            currentFileEncryptionTask = null;
+        });
+
+        currentFileEncryptionTask.setOnFailed(e -> {
+            Platform.runLater(() -> {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setContentText("File encryption/upload failed: " + currentFileEncryptionTask.getException().getMessage());
+                alert.show();
+                fileStatusLabel.setText("Encryption failed: " + currentFileEncryptionTask.getException().getMessage());
+                fileStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: red;");
+                resetFileEncryptionUI();
+            });
+        });
+
+        currentFileEncryptionTask.setOnCancelled(e -> {
+            Platform.runLater(() -> {
+                // Clean up any partial encrypted files
+                if (encryptedFileWithIV != null) {
+                    try {
+                        Files.deleteIfExists(encryptedFileWithIV);
+                    } catch (Exception ex) {
+                        // Ignore cleanup errors
+                    }
+                    encryptedFileWithIV = null;
+                }
+                fileStatusLabel.setText("Encryption cancelled.");
+                fileStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: orange;");
+                resetFileEncryptionUI();
+            });
+        });
+
+        // Start encryption in background thread
+        new Thread(currentFileEncryptionTask).start();
+    }
+
+    private void handleCancelFileEncryption() {
+        if (currentFileEncryptionTask != null && !currentFileEncryptionTask.isDone()) {
+            currentFileEncryptionTask.cancel();
+        }
+    }
+
+    private void handleSendFile() {
+        if (encryptedFileWithIV == null || !Files.exists(encryptedFileWithIV)) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setContentText("No encrypted file available. Please encrypt a file first.");
+            alert.show();
+            return;
+        }
+
+        // Disable send button and show progress
+        sendFileButton.setDisable(true);
+        fileEncryptionProgress.setVisible(true);
+        fileEncryptionProgress.setProgress(-1); // Indeterminate
+        fileStatusLabel.setText("Uploading file...");
+
+        // Create task for file upload
+        Task<String> uploadTask = new Task<String>() {
+            @Override
+            protected String call() throws Exception {
+                updateProgress(-1, 1);
+                updateMessage("Uploading file...");
+
+                // Upload encrypted file
+                FileUploadResponse uploadResponse = apiClient.uploadFile(encryptedFileWithIV.toFile()).get();
+                
+                // Clean up encrypted file after successful upload
+                Files.deleteIfExists(encryptedFileWithIV);
+
+                updateProgress(1.0, 1.0);
+                return uploadResponse.getFileId();
+            }
+        };
+
+        // Bind progress bar to task progress
+        fileEncryptionProgress.progressProperty().bind(uploadTask.progressProperty());
+
+        uploadTask.setOnSucceeded(e -> {
+            String fileId = uploadTask.getValue();
+            if (fileId != null) {
+                // Send file link via WebSocket
+                String fileMessage = "FILE:" + fileId;
+                if (app.socket != null && app.socket.isConnected()) {
+                    app.socket.sendMessage(fileMessage);
+                    addMessageToUI("You", "[File Attachment]", false, fileId);
+                }
+                fileStatusLabel.setText("File uploaded and sent successfully!");
+                fileStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: green;");
+            }
+            resetFileEncryptionUI();
+        });
+
+        uploadTask.setOnFailed(e -> {
+            Platform.runLater(() -> {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setContentText("File upload failed: " + uploadTask.getException().getMessage());
+                alert.show();
+                fileStatusLabel.setText("Upload failed: " + uploadTask.getException().getMessage());
+                fileStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: red;");
+                sendFileButton.setDisable(false); // Re-enable send button to retry
+                fileEncryptionProgress.setVisible(false);
+                fileEncryptionProgress.progressProperty().unbind();
+                fileEncryptionProgress.setProgress(0);
+            });
+        });
+
+        // Start upload in background thread
+        new Thread(uploadTask).start();
+    }
+
+    private void resetFileEncryptionUI() {
+        attachFileButton.setDisable(false);
+        encryptFileButton.setDisable(true);
+        sendFileButton.setDisable(true);
+        cancelFileEncryptionButton.setDisable(true);
+        fileEncryptionProgress.setVisible(false);
+        fileEncryptionProgress.progressProperty().unbind();
+        fileEncryptionProgress.setProgress(0);
+        fileStatusLabel.setVisible(false);
+        selectedFile = null;
+        encryptedFileWithIV = null;
+        currentFileEncryptionTask = null;
+    }
+
+    private String formatFileSize(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        } else if (bytes < 1024 * 1024) {
+            return String.format("%.2f KB", bytes / 1024.0);
+        } else if (bytes < 1024 * 1024 * 1024) {
+            return String.format("%.2f MB", bytes / (1024.0 * 1024.0));
+        } else {
+            return String.format("%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+        }
+    }
+
+    private void handleFileDownload(String fileId) {
+        if (app.socket == null || app.socket.getKey() == null) {
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setContentText("Encryption key not available. Cannot decrypt file.");
+            alert.show();
+            return;
+        }
+
+        // Show progress
+        encryptionProgress.setVisible(true);
+
+        Task<Void> downloadTask = new Task<Void>() {
+            @Override
+            protected Void call() throws Exception {
+                updateMessage("Downloading file...");
+
+                // Get file info first
+                FileInfo fileInfo = apiClient.getFileInfo(fileId).get();
+
+                // Download encrypted file to temp location
+                Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"));
+                Path encryptedFileWithIV = tempDir.resolve("encrypted_with_iv_" + fileId);
+                File tempEncryptedFile = encryptedFileWithIV.toFile();
+
+                updateMessage("Downloading file...");
+                apiClient.downloadFile(fileId, tempEncryptedFile).get();
+
+                // Extract IV from the beginning of the file
+                byte[] key = app.socket.getKey();
+                dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
+                int blockSize = blockCipher.blockSize();
+
+                byte[] iv = new byte[blockSize];
+                try (FileInputStream fis = new FileInputStream(tempEncryptedFile)) {
+                    int bytesRead = fis.read(iv);
+                    if (bytesRead != blockSize) {
+                        throw new IOException("Failed to read IV from encrypted file");
+                    }
+                }
+
+                // Create file without IV for decryption
+                Path encryptedFile = tempDir.resolve("encrypted_" + fileId);
+                try (FileInputStream fis = new FileInputStream(tempEncryptedFile);
+                     FileOutputStream fos = new FileOutputStream(encryptedFile.toFile())) {
+                    // Skip IV
+                    fis.skip(blockSize);
+                    // Copy rest of the file
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = fis.read(buffer)) != -1) {
+                        fos.write(buffer, 0, bytesRead);
+                    }
+                }
+                Files.deleteIfExists(encryptedFileWithIV);
+
+                // Decrypt file
+                updateMessage("Decrypting file...");
+                SymmetricCipher cipher = EncryptionUtil.createCipher(
+                    chat.getAlgorithm(),
+                    chat.getMode(),
+                    chat.getPadding(),
+                    key,
+                    iv
+                );
+
+                // Choose save location on JavaFX thread
+                final FileInfo finalFileInfo = fileInfo;
+                final Path finalEncryptedFile = encryptedFile;
+                Platform.runLater(() -> {
+                    FileChooser fileChooser = new FileChooser();
+                    fileChooser.setTitle("Save Decrypted File");
+                    fileChooser.setInitialFileName(finalFileInfo.getFileName());
+                    Stage stage = (Stage) getScene().getWindow();
+                    File saveFile = fileChooser.showSaveDialog(stage);
+
+                    if (saveFile != null) {
+                        try {
+                            cipher.decryptFile(finalEncryptedFile, saveFile.toPath());
+                            Files.deleteIfExists(finalEncryptedFile);
+                            
+                            Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                            alert.setContentText("File decrypted and saved to: " + saveFile.getAbsolutePath());
+                            alert.show();
+                        } catch (Exception ex) {
+                            Alert alert = new Alert(Alert.AlertType.ERROR);
+                            alert.setContentText("Failed to decrypt file: " + ex.getMessage());
+                            alert.show();
+                        }
+                    } else {
+                        // User cancelled, clean up
+                        try {
+                            Files.deleteIfExists(finalEncryptedFile);
+                        } catch (Exception ex) {
+                            // Ignore cleanup errors
+                        }
+                    }
+                    encryptionProgress.setVisible(false);
+                });
+
+                return null;
+            }
+        };
+
+        downloadTask.setOnFailed(e -> {
+            Platform.runLater(() -> {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setContentText("File download failed: " + downloadTask.getException().getMessage());
+                alert.show();
+                encryptionProgress.setVisible(false);
+            });
+        });
+
+        new Thread(downloadTask).start();
     }
 }
 
