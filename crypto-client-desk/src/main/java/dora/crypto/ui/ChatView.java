@@ -743,6 +743,9 @@ public class ChatView extends BorderPane {
     }
 
     private void handleDisconnect() {
+        // Disconnect socket first
+        app.manageDisconnect();
+        
         apiClient.disconnectFromChat(chat.getId())
                 .thenRun(() -> {
                     javafx.application.Platform.runLater(() -> {

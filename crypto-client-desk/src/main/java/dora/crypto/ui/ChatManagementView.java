@@ -328,6 +328,11 @@ public class ChatManagementView extends VBox {
         }
 
         private void handleDisconnect(Chat chat) {
+            // Disconnect socket if it's for this chat
+            if (app.socket != null && app.socket.getChat() != null && app.socket.getChat().getId().equals(chat.getId())) {
+                app.manageDisconnect();
+            }
+            
             apiClient.disconnectFromChat(chat.getId())
                     .thenRun(() -> Platform.runLater(() -> parentView.loadChats()))
                     .exceptionally(ex -> {

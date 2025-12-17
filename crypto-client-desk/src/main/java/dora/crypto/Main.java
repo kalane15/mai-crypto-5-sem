@@ -77,6 +77,7 @@ public class Main extends Application {
     }
 
     public boolean manageConnectToChat(Chat chat) {
+        // Create new socket
         socket = new ChatWebSocketClient("ws:" + ApiClient.BASE_URL_NO_PROTOCOL, chat, UserName);
         
         // Set up callback to call connectToChat after subscription is ready
@@ -88,6 +89,15 @@ public class Main extends Application {
         
         socket.start();
         return true;
+    }
+
+    public void manageDisconnect() {
+        // Destroy socket if it exists
+        if (socket != null) {
+            System.out.println("Disconnecting and destroying socket");
+            socket.disconnect();
+            socket = null;
+        }
     }
 
     public void showChatView(Chat chat) {
