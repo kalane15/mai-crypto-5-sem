@@ -58,7 +58,7 @@ public class ChatManagementView extends VBox {
         updateFull();
     }
 
-    private void updateFull(){
+    public void updateFull(){
         loadChats();
         loadContacts();
     }

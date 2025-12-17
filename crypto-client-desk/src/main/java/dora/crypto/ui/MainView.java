@@ -43,6 +43,18 @@ public class MainView extends BorderPane {
 
         tabPane.getTabs().addAll(contactsTab, chatsTab);
 
+        // Add listener to refresh data when tabs are selected
+        tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
+            if (newTab != null) {
+                if (newTab.getContent() instanceof ContactManagementView) {
+                    ((ContactManagementView) newTab.getContent()).loadContacts();
+                } else if (newTab.getContent() instanceof ChatManagementView) {
+                    ChatManagementView chatView = (ChatManagementView) newTab.getContent();
+                    chatView.updateFull();
+                }
+            }
+        });
+
         topBox.getChildren().addAll(headerBox, tabPane);
 
         setTop(headerBox);
