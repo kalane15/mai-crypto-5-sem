@@ -112,8 +112,17 @@ public class ChatService {
             chat.setConnectedUser2(true);
         }
 
+        // Update status based on how many users are connected
+        int connectedCount = (chat.isConnectedUser1() ? 1 : 0) + (chat.isConnectedUser2() ? 1 : 0);
         var oldStatus = chat.getStatus();
-        var newStatus = chat.getStatus().next(1);
+        dora.server.chat.Chat.ChatStatus newStatus;
+        if (connectedCount == 0) {
+            newStatus = dora.server.chat.Chat.ChatStatus.CREATED;
+        } else if (connectedCount == 1) {
+            newStatus = dora.server.chat.Chat.ChatStatus.CONNECTED1;
+        } else {
+            newStatus = dora.server.chat.Chat.ChatStatus.CONNECTED2;
+        }
         chat.setStatus(newStatus);
         
         System.out.println("Chat " + chat.getId() + " status: " + oldStatus.name() + " -> " + newStatus.name() + 
@@ -127,10 +136,41 @@ public class ChatService {
                 ? chat.getUser2()
                 : chat.getUser1();
 
+        // If status becomes CONNECTED1, send system message to the connected user
+        if (newStatus == dora.server.chat.Chat.ChatStatus.CONNECTED1) {
+            System.out.println("Chat reached CONNECTED1, sending system message to waiting user");
+            var systemMessage = ChatMessage.builder()
+                    .receiver(currentUser.getUsername())
+                    .sender("System")
+                    .message("You are connected. Waiting for the other user to join...")
+                    .type("SYSTEM")
+                    .build();
+            sendMessage(chat.getId(), systemMessage);
+        }
+
         // If status becomes CONNECTED2, send messages to both users
         if (newStatus == dora.server.chat.Chat.ChatStatus.CONNECTED2) {
-            System.out.println("Chat reached CONNECTED2, sending 'ready for key exchange' messages to both users");
-            // Send message to the other user
+            System.out.println("Chat reached CONNECTED2, sending system messages and 'ready for key exchange' messages to both users");
+            
+            // Send system message to the other user (who was waiting) to inform them the other user has joined
+            var systemMessageToOther = ChatMessage.builder()
+                    .receiver(otherUser.getUsername())
+                    .sender("System")
+                    .message("The other user has joined the chat. Key exchange in progress...")
+                    .type("SYSTEM")
+                    .build();
+            sendMessage(chat.getId(), systemMessageToOther);
+            
+            // Send system message to the current user (who just joined) to inform them they can start messaging
+            var systemMessageToCurrent = ChatMessage.builder()
+                    .receiver(currentUser.getUsername())
+                    .sender("System")
+                    .message("You have joined the chat. Key exchange in progress...")
+                    .type("SYSTEM")
+                    .build();
+            sendMessage(chat.getId(), systemMessageToCurrent);
+            
+            // Send "ready for key exchange" message to the other user
             var messageToOther = ChatMessage.builder()
                     .receiver(otherUser.getUsername())
                     .sender(currentUser.getUsername())
@@ -138,7 +178,7 @@ public class ChatService {
                     .build();
             sendMessage(chat.getId(), messageToOther);
             
-            // Also send message to current user (they should receive it when subscribed)
+            // Also send "ready for key exchange" message to current user (they should receive it when subscribed)
             var messageToCurrent = ChatMessage.builder()
                     .receiver(currentUser.getUsername())
                     .sender(otherUser.getUsername())
@@ -237,6 +277,19 @@ public class ChatService {
                           ", user2 connected: " + chat.isConnectedUser2() + ")");
         
         chatRepository.save(chat);
+        
+        // If there's still one user connected, send system message to inform them
+        if (connectedCount == 1) {
+            User remainingUser = chat.isConnectedUser1() ? chat.getUser1() : chat.getUser2();
+            System.out.println("User disconnected, sending system message to remaining user: " + remainingUser.getUsername());
+            var systemMessage = ChatMessage.builder()
+                    .receiver(remainingUser.getUsername())
+                    .sender("System")
+                    .message("The other user has disconnected from the chat.")
+                    .type("SYSTEM")
+                    .build();
+            sendMessage(chat.getId(), systemMessage);
+        }
     }
 
     @Transactional
@@ -251,40 +304,63 @@ public class ChatService {
             throw new IllegalArgumentException("You can only delete your own chats");
         }
 
-        // Manually disconnect all users from the chat before deleting
+        // Disconnect all users from the chat before deleting
         User user1 = chat.getUser1();
         User user2 = chat.getUser2();
         
-        // Send "chat deleted" notification to all connected users
-        if (chat.isConnectedUser1()) {
+        // Check connection status before disconnecting
+        boolean user1WasConnected = chat.isConnectedUser1();
+        boolean user2WasConnected = chat.isConnectedUser2();
+        
+        // Send "chat deleted" notification to all connected users first
+        if (user1WasConnected) {
             var messageToUser1 = ChatMessage.builder()
                     .receiver(user1.getUsername())
-                    .sender("SYSTEM")
+                    .sender("System")
                     .message("chat deleted")
+                    .type("SYSTEM")
                     .build();
             sendMessage(chatId, messageToUser1);
         }
         
-        if (chat.isConnectedUser2()) {
+        if (user2WasConnected) {
             var messageToUser2 = ChatMessage.builder()
                     .receiver(user2.getUsername())
-                    .sender("SYSTEM")
+                    .sender("System")
                     .message("chat deleted")
+                    .type("SYSTEM")
                     .build();
             sendMessage(chatId, messageToUser2);
         }
 
-        // Disconnect all users by resetting connection flags
+        // Always disconnect all users before deletion, regardless of current connection state
+        // This ensures both users are marked as disconnected in the database
+        // Set both connection flags to false to disconnect both users
+        chat.setConnectedUser1(false);
+        chat.setConnectedUser2(false);
+        
+        // Update status to CREATED (no users connected)
+        chat.setStatus(dora.server.chat.Chat.ChatStatus.CREATED);
+        
+        // Save the updated state - this persists the disconnect for both users
+        chat = chatRepository.save(chat);
+        
+        // Verify both users are now disconnected
         if (chat.isConnectedUser1() || chat.isConnectedUser2()) {
-            chat.setConnectedUser1(false);
-            chat.setConnectedUser2(false);
-            chat.setStatus(dora.server.chat.Chat.ChatStatus.CREATED);
-            chatRepository.save(chat);
-            System.out.println("Disconnected all users from chat " + chatId + " before deletion");
+            throw new IllegalStateException("Failed to disconnect all users from chat " + chatId + 
+                                         " - user1: " + chat.isConnectedUser1() + 
+                                         ", user2: " + chat.isConnectedUser2());
         }
+        
+        System.out.println("Successfully disconnected all users from chat " + chatId + " before deletion " +
+                         "(user1 was connected: " + user1WasConnected + 
+                         ", user2 was connected: " + user2WasConnected + 
+                         ", user1 now connected: " + chat.isConnectedUser1() +
+                         ", user2 now connected: " + chat.isConnectedUser2() + ")");
 
         // Delete the chat
         chatRepository.delete(chat);
+        System.out.println("Chat " + chatId + " deleted successfully");
     }
 
     private Chat toDto(dora.server.chat.Chat chat, User otherUser) {

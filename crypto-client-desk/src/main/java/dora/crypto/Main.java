@@ -65,8 +65,14 @@ public class Main extends Application {
     private void onAuthSuccess(String username) {
         Platform.runLater(() -> {
             mainView.setCurrentUser(username);
-            mainViewScene = new Scene(mainView, 900, 700);
-            primaryStage.setScene(mainViewScene);
+            // Reuse the existing mainViewScene instead of creating a new one
+            if (mainViewScene != null) {
+                primaryStage.setScene(mainViewScene);
+            } else {
+                // Create scene if it doesn't exist (first time)
+                mainViewScene = new Scene(mainView, 900, 700);
+                primaryStage.setScene(mainViewScene);
+            }
         });
     }
 

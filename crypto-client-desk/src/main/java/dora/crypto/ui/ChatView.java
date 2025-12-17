@@ -88,8 +88,6 @@ public class ChatView extends BorderPane {
             Platform.runLater(() -> {
                 messageContainer.getChildren().clear();
                 if (app.socket.isConnected()) {
-                    addMessageToUI("System", "Chat connected. You can now send messages.", false, null);
-                    // Reset IV when connection is established (handles reconnection)
                     resetIVOnConnection();
                 } else {
                     addMessageToUI("System", "Connecting to chat...", false, null);
@@ -137,7 +135,7 @@ public class ChatView extends BorderPane {
             String messageText = message.getMessage();
             
             // Handle system messages
-            if ("SYSTEM".equals(message.getSender()) && "chat deleted".equals(messageText)) {
+            if ("System".equals(message.getSender()) && "chat deleted".equals(messageText)) {
                 // Chat was deleted, delete messages from database and switch to main view
                 deleteChatMessages();
                 Alert alert = new Alert(Alert.AlertType.INFORMATION);
@@ -163,6 +161,11 @@ public class ChatView extends BorderPane {
             }
             
             switch (messageType) {
+                case "SYSTEM":
+                    // System message - display with System sender
+                    addMessageToUI("System", messageText, false, null);
+                    break;
+                    
                 case "FILE":
                     // File link message - messageText contains just the fileId
                     addMessageToUI(message.getSender(), "[File Attachment]", false, messageText);

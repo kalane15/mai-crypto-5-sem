@@ -20,12 +20,18 @@ public class ContactController {
 
     @Operation(summary = "Add a new contact")
     @PostMapping
-    public ResponseEntity<Contact> addContact(@RequestBody @Valid ContactRequest request) {
+    public ResponseEntity<?> addContact(@RequestBody @Valid ContactRequest request) {
         try {
             Contact contact = contactService.addContact(request);
             return ResponseEntity.ok(contact);
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
+            // Return error message in response body
+            return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("message", e.getMessage()));
+        } catch (org.springframework.security.core.userdetails.UsernameNotFoundException e) {
+            // Handle UsernameNotFoundException if it somehow escapes
+            return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("message", "User not found: " + request.getUsername()));
         }
     }
 
@@ -60,12 +66,18 @@ public class ContactController {
 
     @Operation(summary = "Delete a contact")
     @DeleteMapping("/{contactId}")
-    public ResponseEntity<Void> deleteContact(@PathVariable("contactId") Long contactId) {
+    public ResponseEntity<?> deleteContact(@PathVariable("contactId") Long contactId) {
         try {
             contactService.deleteContact(contactId);
             return ResponseEntity.ok().build();
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
+            // Return error message in response body
+            return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            // Handle other exceptions
+            return ResponseEntity.badRequest()
+                    .body(java.util.Map.of("message", "Failed to delete contact: " + e.getMessage()));
         }
     }
 }

@@ -4,6 +4,7 @@ import dora.crypto.shared.dto.ContactRequest;
 import dora.crypto.shared.dto.Contact;
 import dora.server.auth.User;
 import dora.server.auth.UserService;
+import dora.server.chat.ChatRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,10 +17,18 @@ import java.util.stream.Collectors;
 public class ContactService {
     private final ContactRepository contactRepository;
     private final UserService userService;
+    private final ChatRepository chatRepository;
 
     public Contact addContact(ContactRequest request) {
         User currentUser = userService.getCurrentUser();
-        User contactUser = userService.getByUsername(request.getUsername());
+        
+        // Check if user exists before proceeding
+        User contactUser;
+        try {
+            contactUser = userService.getByUsername(request.getUsername());
+        } catch (org.springframework.security.core.userdetails.UsernameNotFoundException e) {
+            throw new IllegalArgumentException("User not found: " + request.getUsername());
+        }
 
         if (currentUser.getUsername().equals(contactUser.getUsername())) {
             throw new IllegalArgumentException("Cannot add yourself as a contact");
@@ -117,8 +126,9 @@ public class ContactService {
             throw new IllegalArgumentException("Contact is not in PENDING status");
         }
 
-        contact.setStatus(dora.server.contact.Contact.ContactStatus.REJECTED);
-        contactRepository.save(contact);
+        // Delete the contact instead of setting status to REJECTED
+        // This removes it from the pending contacts list
+        contactRepository.delete(contact);
     }
 
     @Transactional
@@ -127,40 +137,65 @@ public class ContactService {
         dora.server.contact.Contact contact = contactRepository.findById(contactId)
                 .orElseThrow(() -> new IllegalArgumentException("Contact not found"));
 
-        if (!contact.getUser().getUsername().equals(currentUser.getUsername())) {
-            throw new IllegalArgumentException("You can only delete your own contacts");
+        // Allow deletion if current user is the sender OR the recipient
+        // This allows both users to delete a confirmed contact
+        boolean isSender = contact.getUser().getUsername().equals(currentUser.getUsername());
+        boolean isRecipient = contact.getContactUser().getUsername().equals(currentUser.getUsername());
+        
+        if (!isSender && !isRecipient) {
+            throw new IllegalArgumentException("You can only delete contacts that involve you");
         }
 
+        // Delete all chats associated with this contact first (to avoid foreign key constraint violation)
+        List<dora.server.chat.Chat> chatsWithContact = chatRepository.findByContact_Id(contactId);
+        if (!chatsWithContact.isEmpty()) {
+            chatRepository.deleteAll(chatsWithContact);
+        }
+
+        // Delete the contact
         contactRepository.delete(contact);
 
         // Also delete reverse contact if it exists
         contactRepository.findByUserAndContactUser(contact.getContactUser(), contact.getUser())
-                .ifPresent(contactRepository::delete);
+                .ifPresent(reverseContact -> {
+                    // Also delete chats associated with reverse contact
+                    List<dora.server.chat.Chat> chatsWithReverseContact = chatRepository.findByContact_Id(reverseContact.getId());
+                    if (!chatsWithReverseContact.isEmpty()) {
+                        chatRepository.deleteAll(chatsWithReverseContact);
+                    }
+                    contactRepository.delete(reverseContact);
+                });
     }
 
     private Contact toDto(dora.server.contact.Contact contact) {
+        // This method is used when adding a contact, so current user is always the sender
         return Contact.builder()
                 .id(contact.getId())
                 .username(contact.getContactUser().getUsername())
                 .status(contact.getStatus().name())
+                .isSentByMe(true) // When adding, current user is always the sender
                 .build();
     }
 
     private Contact toDto(dora.server.contact.Contact contact, User currentUser) {
         // Determine the other user in the contact relationship
         String otherUsername;
+        boolean isSentByMe;
         if (contact.getUser().getUsername().equals(currentUser.getUsername())) {
             // Current user is the sender, so the other user is the contactUser
             otherUsername = contact.getContactUser().getUsername();
+            isSentByMe = true;
         } else {
             // Current user is the recipient, so the other user is the user (sender)
             otherUsername = contact.getUser().getUsername();
+            isSentByMe = false;
         }
 
         return Contact.builder()
                 .id(contact.getId())
                 .username(otherUsername)
                 .status(contact.getStatus().name())
+                .isSentByMe(isSentByMe)
                 .build();
     }
 }

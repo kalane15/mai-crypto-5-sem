@@ -8,8 +8,6 @@ import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
-import java.util.List;
-
 public class ContactManagementView extends VBox {
     private final ApiClient apiClient;
     private ListView<Contact> contactListView;
@@ -75,7 +73,8 @@ public class ContactManagementView extends VBox {
                 })
                 .exceptionally(ex -> {
                     Platform.runLater(() -> {
-                        statusLabel.setText("Failed to add contact: " + ex.getCause().getMessage());
+                        String errorMessage = getContactErrorMessage(ex);
+                        statusLabel.setText(errorMessage);
                         statusLabel.setStyle("-fx-text-fill: red;");
                     });
                     return null;
@@ -147,16 +146,27 @@ public class ContactManagementView extends VBox {
             buttonBox.getChildren().clear();
 
             if ("PENDING".equals(contact.getStatus())) {
-                Button confirmButton = new Button("Confirm");
-                confirmButton.setOnAction(e -> handleConfirm(contact));
-                Button rejectButton = new Button("Reject");
-                rejectButton.setOnAction(e -> handleReject(contact));
-                buttonBox.getChildren().addAll(confirmButton, rejectButton);
+                // Check if this contact request was sent by the current user
+                Boolean isSentByMe = contact.getIsSentByMe();
+                if (isSentByMe != null && isSentByMe) {
+                    // For pending contacts sent by current user, show Cancel button
+                    Button cancelButton = new Button("Cancel");
+                    cancelButton.setOnAction(e -> handleCancel(contact));
+                    buttonBox.getChildren().add(cancelButton);
+                } else {
+                    // For pending contacts received by current user, show Confirm and Reject buttons
+                    Button confirmButton = new Button("Confirm");
+                    confirmButton.setOnAction(e -> handleConfirm(contact));
+                    Button rejectButton = new Button("Reject");
+                    rejectButton.setOnAction(e -> handleReject(contact));
+                    buttonBox.getChildren().addAll(confirmButton, rejectButton);
+                }
+            } else {
+                // For confirmed contacts, show only Delete button
+                Button deleteButton = new Button("Delete");
+                deleteButton.setOnAction(e -> handleDelete(contact));
+                buttonBox.getChildren().add(deleteButton);
             }
-
-            Button deleteButton = new Button("Delete");
-            deleteButton.setOnAction(e -> handleDelete(contact));
-            buttonBox.getChildren().add(deleteButton);
 
             setGraphic(cellBox);
         }
@@ -187,6 +197,20 @@ public class ContactManagementView extends VBox {
                     });
         }
 
+        private void handleCancel(Contact contact) {
+            // Cancel a contact request sent by the current user (delete it)
+            apiClient.deleteContact(contact.getId())
+                    .thenRun(() -> Platform.runLater(() -> parentView.loadContacts()))
+                    .exceptionally(ex -> {
+                        Platform.runLater(() -> {
+                            Alert alert = new Alert(Alert.AlertType.ERROR);
+                            alert.setContentText("Failed to cancel contact request: " + ex.getCause().getMessage());
+                            alert.show();
+                        });
+                        return null;
+                    });
+        }
+
         private void handleDelete(Contact contact) {
             Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
             confirmAlert.setTitle("Delete Contact");
@@ -206,6 +230,61 @@ public class ContactManagementView extends VBox {
                 }
             });
         }
+    }
+
+    /**
+     * Extracts and formats user-friendly error messages for contact operations.
+     */
+    private String getContactErrorMessage(Throwable ex) {
+        if (ex == null) {
+            return "Failed to add contact. Please try again.";
+        }
+
+        Throwable cause = ex.getCause();
+        if (cause == null) {
+            cause = ex;
+        }
+
+        String message = cause.getMessage();
+        if (message == null || message.isEmpty()) {
+            return "Failed to add contact. Please try again.";
+        }
+
+        // Check for specific error patterns
+        String lowerMessage = message.toLowerCase();
+        
+        // User not found
+        if (lowerMessage.contains("user not found") || 
+            lowerMessage.contains("пользователь не найден") ||
+            lowerMessage.contains("username not found")) {
+            return "User not found. Please check the username and try again.";
+        }
+
+        // Cannot add yourself
+        if (lowerMessage.contains("cannot add yourself") ||
+            lowerMessage.contains("add yourself")) {
+            return "You cannot add yourself as a contact.";
+        }
+
+        // Contact already exists
+        if (lowerMessage.contains("contact already exists") ||
+            lowerMessage.contains("already exists")) {
+            return "This contact already exists in your contact list.";
+        }
+
+        // Contact request already exists
+        if (lowerMessage.contains("contact request already exists") ||
+            lowerMessage.contains("request already exists")) {
+            return "A contact request from this user already exists.";
+        }
+
+        // Unauthorized - don't show this as a contact error, it's an auth issue
+        if (lowerMessage.contains("unauthorized")) {
+            return "Session expired. Please sign in again.";
+        }
+
+        // Return the original message if it's already user-friendly, otherwise provide a generic message
+        return message;
     }
 }
 

@@ -195,13 +195,22 @@ public class ApiClient {
 
             return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                     .thenApply(response -> {
-                        if (handleUnauthorized(response.statusCode(), response.body())) {
-                            throw new RuntimeException("Unauthorized - please sign in again");
+                        // Only handle unauthorized for 401/403, not for 400 (bad request)
+                        if (response.statusCode() == 401 || response.statusCode() == 403) {
+                            if (handleUnauthorized(response.statusCode(), response.body())) {
+                                throw new RuntimeException("Unauthorized - please sign in again");
+                            }
                         }
                         if (response.statusCode() >= 200 && response.statusCode() < 300) {
                             return null;
                         } else {
-                            throw new RuntimeException("Add contact failed: " + response.statusCode() + " - " + response.body());
+                            // Extract user-friendly error message from response
+                            String errorMessage = extractErrorMessage(response.body());
+                            if (errorMessage != null && !errorMessage.isEmpty()) {
+                                throw new RuntimeException(errorMessage);
+                            } else {
+                                throw new RuntimeException("Failed to add contact. Please try again.");
+                            }
                         }
                     });
         } catch (Exception e) {

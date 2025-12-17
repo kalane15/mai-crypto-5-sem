@@ -22,6 +22,7 @@ public class ChatWebSocketClient {
     private byte[] key;
     private final ObjectMapper objectMapper;
     private ChatKeyPart pendingKeyPart = null; // Store key part received before we sent ours
+    private boolean keyExchangeCompleteMessageSent = false; // Track if we've sent the "key exchange complete" message
 
     public byte[] getKey() {
         return key;
@@ -118,6 +119,8 @@ public class ChatWebSocketClient {
     private void regenerateKeyExchangeParameters() {
         // Reset key to null to ensure fresh key calculation
         key = null;
+        // Reset flag so we can send the "key exchange complete" message for this new key exchange
+        keyExchangeCompleteMessageSent = false;
         
         // Generate new private exponent 'a' for this key exchange
         // This ensures both users use fresh exponents for the new key exchange session
@@ -163,6 +166,64 @@ public class ChatWebSocketClient {
         if (key.length >= 4) {
             System.out.println("[" + username + "] First 4 bytes of calculated key: [" + 
                 (key[0] & 0xff) + ", " + (key[1] & 0xff) + ", " + (key[2] & 0xff) + ", " + (key[3] & 0xff) + "]");
+        }
+        
+        // Send system message when key exchange completes (only once per key exchange)
+        if (!keyExchangeCompleteMessageSent) {
+            keyExchangeCompleteMessageSent = true;
+            System.out.println("[" + username + "] Key exchange complete, attempting to send success message...");
+            sendSystemMessage("Key exchange successful! You can now send encrypted messages.");
+        } else {
+            System.out.println("[" + username + "] Key exchange complete message already sent, skipping...");
+        }
+    }
+    
+    /**
+     * Sends a system message through the WebSocket to the other user only.
+     * Each user sends it once to the contact, so both users receive it once.
+     */
+    private void sendSystemMessage(String messageText) {
+        if (sessionHandler != null && sessionHandler instanceof ChatStompSessionHandler) {
+            ChatStompSessionHandler handler = (ChatStompSessionHandler) sessionHandler;
+            if (handler.session != null && handler.session.isConnected() && subscriptionReady) {
+                try {
+                    // Send only to contact - each user sends once, so both receive once
+                    var messageToContact = ChatMessage.builder()
+                            .sender("System")
+                            .receiver(chat.getContactUsername())
+                            .message(messageText)
+                            .type("SYSTEM")
+                            .build();
+                    handler.sendChatMessage(messageToContact);
+                    System.out.println("[" + username + "] Sent system message to contact: " + chat.getContactUsername());
+                    System.out.println("[" + username + "] Successfully sent system message: " + messageText);
+                } catch (Exception e) {
+                    System.err.println("[" + username + "] Failed to send system message: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            } else {
+                System.err.println("[" + username + "] Cannot send system message - session not ready. " +
+                                 "Connected: " + (handler.session != null && handler.session.isConnected()) +
+                                 ", SubscriptionReady: " + subscriptionReady);
+                // Retry after a short delay if subscription isn't ready yet
+                if (handler.session != null && handler.session.isConnected() && !subscriptionReady) {
+                    System.out.println("[" + username + "] Retrying system message send after delay...");
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(200); // Wait a bit longer for subscription to be ready
+                            if (subscriptionReady) {
+                                sendSystemMessage(messageText);
+                            } else {
+                                System.err.println("[" + username + "] Subscription still not ready after delay, message not sent");
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }).start();
+                }
+            }
+        } else {
+            System.err.println("[" + username + "] Cannot send system message - session handler not initialized or wrong type");
         }
     }
 
@@ -262,6 +323,7 @@ public class ChatWebSocketClient {
             ChatWebSocketClient.this.key = null;
             ChatWebSocketClient.this.keyPartSentInThisSession = false; // Reset flag for new connection
             ChatWebSocketClient.this.pendingKeyPart = null; // Clear any pending key part from previous session
+            ChatWebSocketClient.this.keyExchangeCompleteMessageSent = false; // Reset flag for new key exchange
             
             System.out.println("[" + username + "] Key reset for new connection - will regenerate parameters when 'ready for key exchange' is received");
             
@@ -431,16 +493,15 @@ public class ChatWebSocketClient {
             if (chatMessage != null) {
                 System.out.println("[" + username + "] Received ChatMessage - Receiver: " + chatMessage.getReceiver() + 
                                  ", Sender: " + chatMessage.getSender() + 
+                                 ", Type: " + chatMessage.getType() +
                                  ", Message: " + chatMessage.getMessage());
                 
-                // Handle system messages (like "chat deleted")
-                if ("SYSTEM".equals(chatMessage.getSender())) {
-                    if (Objects.equals(chatMessage.getMessage(), "chat deleted")) {
-                        System.out.println("[" + username + "] Received 'chat deleted' notification");
-                        // Notify callback about chat deletion
-                        if (onMessageReceived != null) {
-                            onMessageReceived.accept(chatMessage);
-                        }
+                // Handle system messages - allow them through regardless of sender
+                if ("SYSTEM".equals(chatMessage.getType()) || "System".equals(chatMessage.getSender())) {
+                    System.out.println("[" + username + "] Received system message: " + chatMessage.getMessage());
+                    // Notify callback about system message (including "chat deleted")
+                    if (onMessageReceived != null) {
+                        onMessageReceived.accept(chatMessage);
                     }
                     return;
                 }
