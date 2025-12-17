@@ -96,7 +96,7 @@ public class ContactManagementView extends VBox {
                 })
                 .exceptionally(ex -> {
                     Platform.runLater(() -> {
-                        statusLabel.setText("Failed to load contacts: " + ex.getCause().getMessage());
+                        statusLabel.setText("Failed to load contacts");
                         statusLabel.setStyle("-fx-text-fill: red;");
                     });
                     return null;
@@ -177,7 +177,7 @@ public class ContactManagementView extends VBox {
                     .exceptionally(ex -> {
                         Platform.runLater(() -> {
                             Alert alert = new Alert(Alert.AlertType.ERROR);
-                            alert.setContentText("Failed to confirm contact: " + ex.getCause().getMessage());
+                            alert.setContentText(getGeneralErrorMessage(ex));
                             alert.show();
                         });
                         return null;
@@ -190,7 +190,7 @@ public class ContactManagementView extends VBox {
                     .exceptionally(ex -> {
                         Platform.runLater(() -> {
                             Alert alert = new Alert(Alert.AlertType.ERROR);
-                            alert.setContentText("Failed to reject contact: " + ex.getCause().getMessage());
+                            alert.setContentText(getGeneralErrorMessage(ex));
                             alert.show();
                         });
                         return null;
@@ -204,7 +204,7 @@ public class ContactManagementView extends VBox {
                     .exceptionally(ex -> {
                         Platform.runLater(() -> {
                             Alert alert = new Alert(Alert.AlertType.ERROR);
-                            alert.setContentText("Failed to cancel contact request: " + ex.getCause().getMessage());
+                            alert.setContentText(getGeneralErrorMessage(ex));
                             alert.show();
                         });
                         return null;
@@ -222,13 +222,58 @@ public class ContactManagementView extends VBox {
                             .exceptionally(ex -> {
                                 Platform.runLater(() -> {
                                     Alert alert = new Alert(Alert.AlertType.ERROR);
-                                    alert.setContentText("Failed to delete contact: " + ex.getCause().getMessage());
+                                    alert.setContentText(getGeneralErrorMessage(ex));
                                     alert.show();
                                 });
                                 return null;
                             });
                 }
             });
+        }
+        
+        /**
+         * Returns a general error message for alerts, hiding technical details and status codes.
+         */
+        private String getGeneralErrorMessage(Throwable ex) {
+            if (ex == null) {
+                return "Invalid action";
+            }
+
+            Throwable cause = ex.getCause();
+            if (cause == null) {
+                cause = ex;
+            }
+
+            String message = cause.getMessage();
+            if (message == null || message.isEmpty()) {
+                return "Invalid action";
+            }
+
+            // Check if message contains status codes (e.g., "400", "500", "404", etc.)
+            if (message.matches(".*\\b\\d{3}\\b.*") || 
+                message.contains("status code") || 
+                message.contains("StatusCode") ||
+                message.contains("HTTP")) {
+                return "Invalid action";
+            }
+
+            // Check for specific user-friendly messages that should be shown
+            String lowerMessage = message.toLowerCase();
+            
+            // User not found - this is user-friendly
+            if (lowerMessage.contains("user not found") || 
+                lowerMessage.contains("пользователь не найден")) {
+                return "User not found. Please check the username and try again.";
+            }
+
+            // Unauthorized - show friendly message
+            if (lowerMessage.contains("unauthorized") || 
+                lowerMessage.contains("session expired")) {
+                return "Session expired. Please sign in again.";
+            }
+
+            // For all other errors, show generic message
+            return "Invalid action";
         }
     }
 
