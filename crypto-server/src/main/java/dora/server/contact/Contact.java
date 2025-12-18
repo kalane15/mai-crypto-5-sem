@@ -32,8 +32,7 @@ public class Contact {
 
     public enum ContactStatus {
         PENDING,
-        CONFIRMED,
-        REJECTED
+        CONFIRMED
     }
 }
 
