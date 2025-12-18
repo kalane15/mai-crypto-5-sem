@@ -104,6 +104,28 @@ public class MessageDatabase {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createIndexSQL);
         }
+        
+        // Create chat_keys table to store encryption keys per chat
+        String createKeysTableSQL;
+        if ("postgres".equals(dbType)) {
+            createKeysTableSQL = """
+                CREATE TABLE IF NOT EXISTS chat_keys (
+                    chat_id BIGINT PRIMARY KEY,
+                    encryption_key BYTEA NOT NULL
+                )
+                """;
+        } else {
+            createKeysTableSQL = """
+                CREATE TABLE IF NOT EXISTS chat_keys (
+                    chat_id INTEGER PRIMARY KEY,
+                    encryption_key BLOB NOT NULL
+                )
+                """;
+        }
+        
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute(createKeysTableSQL);
+        }
     }
 
     /**
@@ -191,6 +213,113 @@ public class MessageDatabase {
             System.out.println("Deleted " + deleted + " messages for chat " + chatId);
         } catch (SQLException e) {
             System.err.println("Failed to delete messages: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Update local file path for a message with the given fileId.
+     */
+    public void updateLocalFilePath(Long chatId, String fileId, String localFilePath) {
+        String sql = "UPDATE messages SET local_file_path = ? WHERE chat_id = ? AND file_id = ?";
+        
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, localFilePath);
+            pstmt.setLong(2, chatId);
+            pstmt.setString(3, fileId);
+            int updated = pstmt.executeUpdate();
+            if (updated > 0) {
+                System.out.println("Updated local file path for fileId: " + fileId);
+            }
+        } catch (SQLException e) {
+            System.err.println("Failed to update local file path: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Save encryption key for a chat.
+     */
+    public void saveChatKey(Long chatId, byte[] key) {
+        String sql = "INSERT OR REPLACE INTO chat_keys (chat_id, encryption_key) VALUES (?, ?)";
+        if ("postgres".equals(config.getDbType())) {
+            sql = "INSERT INTO chat_keys (chat_id, encryption_key) VALUES (?, ?) ON CONFLICT (chat_id) DO UPDATE SET encryption_key = EXCLUDED.encryption_key";
+        }
+        
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setLong(1, chatId);
+            if ("postgres".equals(config.getDbType())) {
+                pstmt.setBytes(2, key);
+            } else {
+                pstmt.setBytes(2, key);
+            }
+            pstmt.executeUpdate();
+            System.out.println("Saved encryption key for chat " + chatId);
+        } catch (SQLException e) {
+            System.err.println("Failed to save chat key: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Load encryption key for a chat.
+     * @return The encryption key, or null if not found
+     */
+    public byte[] loadChatKey(Long chatId) {
+        String sql = "SELECT encryption_key FROM chat_keys WHERE chat_id = ?";
+        
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setLong(1, chatId);
+            ResultSet rs = pstmt.executeQuery();
+            
+            if (rs.next()) {
+                byte[] key = rs.getBytes("encryption_key");
+                System.out.println("Loaded encryption key for chat " + chatId);
+                return key;
+            }
+        } catch (SQLException e) {
+            System.err.println("Failed to load chat key: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Check if a key exists for a chat.
+     */
+    public boolean hasChatKey(Long chatId) {
+        String sql = "SELECT COUNT(*) FROM chat_keys WHERE chat_id = ?";
+        
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setLong(1, chatId);
+            ResultSet rs = pstmt.executeQuery();
+            
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        } catch (SQLException e) {
+            System.err.println("Failed to check chat key: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Delete encryption key for a chat.
+     */
+    public void deleteChatKey(Long chatId) {
+        String sql = "DELETE FROM chat_keys WHERE chat_id = ?";
+        
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setLong(1, chatId);
+            int deleted = pstmt.executeUpdate();
+            if (deleted > 0) {
+                System.out.println("Deleted encryption key for chat " + chatId);
+            }
+        } catch (SQLException e) {
+            System.err.println("Failed to delete chat key: " + e.getMessage());
             e.printStackTrace();
         }
     }

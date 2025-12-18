@@ -1,6 +1,7 @@
 package dora.crypto;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dora.crypto.db.MessageDatabase;
 import dora.crypto.shared.dto.Chat;
 import dora.crypto.shared.dto.ChatMessage;
 import dora.crypto.shared.dto.ChatKeyPart;
@@ -42,20 +43,32 @@ public class ChatWebSocketClient {
     private Runnable onSubscriptionReady;
     private boolean subscriptionReady = false;
     private boolean keyPartSentInThisSession = false; // Track if we've sent key part in current session
+    private MessageDatabase messageDatabase;
+    private boolean keyExchangePerformed = false; // Track if key exchange has been performed for this chat
 
     public ChatWebSocketClient(String url, Chat chat, String username) {
         this.url = url + "/chat";
         this.chat = chat;
         this.username = username;
         this.objectMapper = new ObjectMapper();
+        this.messageDatabase = new MessageDatabase();
 
-        // Reset key to null to ensure fresh key exchange on each connection
-        this.key = null;
-
-        // Generate new private exponent 'a' for each connection
-        // This ensures a fresh key exchange every time users connect
-        this.a = generatePrivateExponent(chat.getAlgorithm(), chat.getP());
-        this.constant = chat.getG().modPow(a, chat.getP());
+        // Check if key already exists in database (key exchange was performed before)
+        byte[] existingKey = messageDatabase.loadChatKey(chat.getId());
+        if (existingKey != null) {
+            // Key exists - use it and skip key exchange
+            this.key = existingKey;
+            this.keyExchangePerformed = true;
+            System.out.println("[" + username + "] Loaded existing encryption key from database for chat " + chat.getId());
+        } else {
+            // No key exists - will perform key exchange
+            this.key = null;
+            this.keyExchangePerformed = false;
+            // Generate new private exponent 'a' for key exchange
+            this.a = generatePrivateExponent(chat.getAlgorithm(), chat.getP());
+            this.constant = chat.getG().modPow(a, chat.getP());
+            System.out.println("[" + username + "] No existing key found - will perform key exchange for chat " + chat.getId());
+        }
     }
 
     /**
@@ -172,6 +185,11 @@ public class ChatWebSocketClient {
             System.out.println("[" + username + "] First 4 bytes of calculated key: [" +
                     (key[0] & 0xff) + ", " + (key[1] & 0xff) + ", " + (key[2] & 0xff) + ", " + (key[3] & 0xff) + "]");
         }
+
+        // Save key to database for future use
+        messageDatabase.saveChatKey(chat.getId(), key);
+        this.keyExchangePerformed = true;
+        System.out.println("[" + username + "] Saved encryption key to database for chat " + chat.getId());
 
         // Send system message when key exchange completes (only once per key exchange)
         System.out.println("[" + username + "] Key exchange complete, attempting to send success message...");
@@ -300,14 +318,15 @@ public class ChatWebSocketClient {
         }
         
         // Clear all callbacks and state
+        // NOTE: Do NOT clear the key - it should remain in memory and database for reconnection
         this.onMessageReceived = null;
         this.onSubscriptionReady = null;
         this.subscriptionReady = false;
         this.keyPartSentInThisSession = false;
-        this.key = null;
+        // Keep key in memory: this.key is NOT set to null
         this.sessionHandler = null;
         
-        System.out.println("[" + username + "] WebSocket client destroyed");
+        System.out.println("[" + username + "] WebSocket client destroyed (key preserved for reconnection)");
     }
 
     public CompletableFuture<Void> start() {
@@ -339,15 +358,22 @@ public class ChatWebSocketClient {
             System.out.println("Connected to WebSocket server");
             this.session = session;
 
-            // Reset key and flags on each new connection
-            // We do NOT regenerate parameters here to avoid race conditions.
-            // Parameters will be regenerated when "ready for key exchange" is received,
-            // ensuring both users regenerate at the same time and use matching parameters.
-            ChatWebSocketClient.this.key = null;
+            // On reconnection, try to load key from database if not already in memory
+            if (ChatWebSocketClient.this.key == null) {
+                byte[] existingKey = messageDatabase.loadChatKey(chat.getId());
+                if (existingKey != null) {
+                    ChatWebSocketClient.this.key = existingKey;
+                    ChatWebSocketClient.this.keyExchangePerformed = true;
+                    System.out.println("[" + username + "] Loaded encryption key from database on reconnection for chat " + chat.getId());
+                } else {
+                    System.out.println("[" + username + "] No key found in database - will perform key exchange if needed");
+                }
+            } else {
+                System.out.println("[" + username + "] Using existing key from memory on reconnection");
+            }
+            
+            // Reset flags on each new connection
             ChatWebSocketClient.this.keyPartSentInThisSession = false; // Reset flag for new connection
-
-
-            System.out.println("[" + username + "] Key reset for new connection - will regenerate parameters when 'ready for key exchange' is received");
 
             // Subscribe to chat-specific topic: /topic/messages/{chatId}/{username}
             String topic = "/topic/messages/" + chat.getId() + "/" + username;
@@ -530,22 +556,28 @@ public class ChatWebSocketClient {
                 // Verify sender is the contact (safety check)
                 if (Objects.equals(chatMessage.getSender(), chat.getContactUsername())) {
                     if (Objects.equals(chatMessage.getMessage(), "ready for key exchange")) {
-                        System.out.println("[" + username + "] Received 'ready for key exchange', generating new key part...");
+                        // Only perform key exchange if we don't already have a key
+                        if (keyExchangePerformed && key != null) {
+                            System.out.println("[" + username + "] Received 'ready for key exchange', but key already exists. Skipping key exchange.");
+                            // Still send system message to acknowledge
+                            sendSystemMessage("Key exchange skipped - using existing key.");
+                        } else {
+                            System.out.println("[" + username + "] Received 'ready for key exchange', generating new key part...");
 
-
-                        // Generate new private exponent and key part for this key exchange
-                        // This ensures both users use fresh exponents and calculate the same new key
-                        // Both the already-connected user and newly-connecting user will regenerate
-                        // to ensure they're using the same key exchange session
-                        regenerateKeyExchangeParameters();
-                        // Small delay to ensure both users have regenerated before sending
-                        // This helps with synchronization
-                        try {
-                            Thread.sleep(50);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
+                            // Generate new private exponent and key part for this key exchange
+                            // This ensures both users use fresh exponents and calculate the same new key
+                            // Both the already-connected user and newly-connecting user will regenerate
+                            // to ensure they're using the same key exchange session
+                            regenerateKeyExchangeParameters();
+                            // Small delay to ensure both users have regenerated before sending
+                            // This helps with synchronization
+                            try {
+                                Thread.sleep(50);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                            parentHandler.sendKeyPart();
                         }
-                        parentHandler.sendKeyPart();
                     } else {
                         // Regular chat message - notify callback
                         if (onMessageReceived != null) {
