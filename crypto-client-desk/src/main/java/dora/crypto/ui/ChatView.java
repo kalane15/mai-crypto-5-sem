@@ -835,30 +835,37 @@ public class ChatView extends BorderPane {
                 try {
                     Path cachedImagePath = imageLoadTask.getValue();
                     if (cachedImagePath != null && Files.exists(cachedImagePath)) {
-                        // Display cached image
                         displayCachedImage(messageBox, imageContainer, senderLabel, cachedImagePath, fileId, fileName);
                     } else {
-                        // Image failed to load, show error
                         imageContainer.getChildren().clear();
                         imageContainer.getChildren().add(senderLabel);
                         Label errorLabel = new Label("Failed to load image");
                         errorLabel.setStyle("-fx-text-fill: red;");
                         imageContainer.getChildren().add(errorLabel);
-                        displayFileAttachment(messageBox, senderLabel, fileId, true);
+                        Button downloadButton = createDownloadButton(fileId);
+                        imageContainer.getChildren().add(downloadButton);
                     }
                 } catch (Exception ex) {
-                    // Error loading image, fall back to file attachment
                     imageContainer.getChildren().clear();
-                    displayFileAttachment(messageBox, senderLabel, fileId, true);
+                    imageContainer.getChildren().add(senderLabel);
+                    Label errorLabel = new Label("Failed to load image");
+                    errorLabel.setStyle("-fx-text-fill: red;");
+                    imageContainer.getChildren().add(errorLabel);
+                    Button downloadButton = createDownloadButton(fileId);
+                    imageContainer.getChildren().add(downloadButton);
                 }
             });
         });
         
         imageLoadTask.setOnFailed(e -> {
             Platform.runLater(() -> {
-                // Remove loading indicator and show file attachment instead
                 imageContainer.getChildren().clear();
-                displayFileAttachment(messageBox, senderLabel, fileId, true);
+                imageContainer.getChildren().add(senderLabel);
+                Label errorLabel = new Label("Failed to load image");
+                errorLabel.setStyle("-fx-text-fill: red;");
+                imageContainer.getChildren().add(errorLabel);
+                Button downloadButton = createDownloadButton(fileId);
+                imageContainer.getChildren().add(downloadButton);
             });
         });
         
@@ -868,27 +875,33 @@ public class ChatView extends BorderPane {
     private void displayCachedImage(HBox messageBox, VBox imageContainer, Label senderLabel, 
                                     Path cachedImagePath, String fileId, String fileName) {
         try {
-            // Clear messageBox and add imageContainer first
-            messageBox.getChildren().clear();
-            messageBox.getChildren().add(imageContainer);
-            
-            // Make sure message box is in container BEFORE loading image
             if (!messageContainer.getChildren().contains(messageBox)) {
                 messageContainer.getChildren().add(messageBox);
             }
             
-            // Remove loading indicator if present
+            if (!messageBox.getChildren().contains(imageContainer)) {
+                messageBox.getChildren().clear();
+                messageBox.getChildren().add(imageContainer);
+            }
+            
+            boolean hasImageView = imageContainer.getChildren().stream()
+                    .anyMatch(node -> node instanceof HBox && 
+                            ((HBox) node).getChildren().stream()
+                                    .anyMatch(child -> child instanceof ImageView));
+            
+            if (hasImageView) {
+                return;
+            }
+            
             imageContainer.getChildren().clear();
             imageContainer.getChildren().add(senderLabel);
             
-            // Load image from cached file
             Image image = new Image("file:" + cachedImagePath.toAbsolutePath().toString());
             
             if (image.isError()) {
                 throw new IOException("Failed to load image from cache");
             }
             
-            // Create ImageView with constraints
             ImageView imageView = new ImageView(image);
             double maxWidth = 400;
             double maxHeight = 400;
@@ -905,7 +918,6 @@ public class ChatView extends BorderPane {
             imageView.setSmooth(true);
             imageView.setCache(true);
             
-            // Add download button for manual download
             Button downloadButton = createDownloadButton(fileId);
             HBox imageBox = new HBox(10);
             imageBox.setAlignment(Pos.CENTER_LEFT);
@@ -913,7 +925,6 @@ public class ChatView extends BorderPane {
             
             imageContainer.getChildren().add(imageBox);
             
-            // Add file name label
             if (fileName != null && !fileName.isEmpty()) {
                 Label fileNameLabel = new Label(fileName);
                 fileNameLabel.setStyle("-fx-text-fill: #999; -fx-font-size: 10px;");
@@ -922,9 +933,13 @@ public class ChatView extends BorderPane {
         } catch (Exception e) {
             System.err.println("Failed to display cached image: " + e.getMessage());
             e.printStackTrace();
-            // Fallback to file attachment
             imageContainer.getChildren().clear();
-            displayFileAttachment(messageBox, senderLabel, fileId, true);
+            imageContainer.getChildren().add(senderLabel);
+            Label errorLabel = new Label("Failed to load image");
+            errorLabel.setStyle("-fx-text-fill: red;");
+            imageContainer.getChildren().add(errorLabel);
+            Button downloadButton = createDownloadButton(fileId);
+            imageContainer.getChildren().add(downloadButton);
         }
     }
     
@@ -1595,9 +1610,9 @@ public class ChatView extends BorderPane {
                         apiClient.getFileInfo(msg.getFileId()).thenAccept(fileInfo -> {
                             Platform.runLater(() -> {
                                 String fileName = fileInfo != null ? fileInfo.getFileName() : null;
-                                messageBox.getChildren().clear();
                                 
                                 if (fileName != null && isImageFile(fileName)) {
+                                    messageBox.getChildren().clear();
                                     if (isImageCached(msg.getFileId(), fileName)) {
                                         Path cachedPath = getCachedImagePath(msg.getFileId(), fileName);
                                         Label newSenderLabel = new Label(msg.getSender() + ":");
@@ -1625,6 +1640,7 @@ public class ChatView extends BorderPane {
                                         downloadAndDisplayImageInPlaceholder(messageBox, imageContainer, newSenderLabel, msg.getFileId(), fileName, msg.getSender());
                                     }
                                 } else {
+                                    messageBox.getChildren().clear();
                                     displayFileAttachment(messageBox, senderLabel, msg.getFileId(), false);
                                 }
                             });
@@ -1723,30 +1739,37 @@ public class ChatView extends BorderPane {
                 try {
                     Path cachedImagePath = imageLoadTask.getValue();
                     if (cachedImagePath != null && Files.exists(cachedImagePath)) {
-                        // Display cached image in the existing placeholder
                         displayCachedImage(messageBox, imageContainer, senderLabel, cachedImagePath, fileId, fileName);
                     } else {
-                        // Image failed to load, show error
                         imageContainer.getChildren().clear();
                         imageContainer.getChildren().add(senderLabel);
                         Label errorLabel = new Label("Failed to load image");
                         errorLabel.setStyle("-fx-text-fill: red;");
                         imageContainer.getChildren().add(errorLabel);
-                        displayFileAttachment(messageBox, senderLabel, fileId, true);
+                        Button downloadButton = createDownloadButton(fileId);
+                        imageContainer.getChildren().add(downloadButton);
                     }
                 } catch (Exception ex) {
-                    // Error loading image, fall back to file attachment
                     imageContainer.getChildren().clear();
-                    displayFileAttachment(messageBox, senderLabel, fileId, true);
+                    imageContainer.getChildren().add(senderLabel);
+                    Label errorLabel = new Label("Failed to load image");
+                    errorLabel.setStyle("-fx-text-fill: red;");
+                    imageContainer.getChildren().add(errorLabel);
+                    Button downloadButton = createDownloadButton(fileId);
+                    imageContainer.getChildren().add(downloadButton);
                 }
             });
         });
         
         imageLoadTask.setOnFailed(e -> {
             Platform.runLater(() -> {
-                // Remove loading indicator and show file attachment instead
                 imageContainer.getChildren().clear();
-                displayFileAttachment(messageBox, senderLabel, fileId, true);
+                imageContainer.getChildren().add(senderLabel);
+                Label errorLabel = new Label("Failed to load image");
+                errorLabel.setStyle("-fx-text-fill: red;");
+                imageContainer.getChildren().add(errorLabel);
+                Button downloadButton = createDownloadButton(fileId);
+                imageContainer.getChildren().add(downloadButton);
             });
         });
         
@@ -1802,37 +1825,49 @@ public class ChatView extends BorderPane {
      * Display image from local file.
      */
     private void displayImageFromLocalFile(HBox messageBox, String senderText, String localFilePath) {
-        // Create new sender label
+        messageBox.getChildren().clear();
+        
         Label senderLabel = new Label(senderText);
         senderLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333;");
         
         VBox imageContainer = new VBox(5);
         imageContainer.setPadding(new Insets(5));
-        
-        // Add sender label
         imageContainer.getChildren().add(senderLabel);
         
-        // Load image from local file
         try {
             Image image = new Image("file:" + localFilePath);
             ImageView imageView = new ImageView(image);
-            imageView.setFitWidth(400);
-            imageView.setFitHeight(400);
-            imageView.setPreserveRatio(true);
+            double maxWidth = 400;
+            double maxHeight = 400;
+            
+            if (image.getWidth() > maxWidth || image.getHeight() > maxHeight) {
+                if (image.getWidth() > image.getHeight()) {
+                    imageView.setFitWidth(maxWidth);
+                } else {
+                    imageView.setFitHeight(maxHeight);
+                }
+                imageView.setPreserveRatio(true);
+            }
+            
             imageView.setSmooth(true);
+            imageView.setCache(true);
             
             imageContainer.getChildren().add(imageView);
             messageBox.getChildren().add(imageContainer);
             
-            // Only add messageBox to container if it's not already there
             if (!messageContainer.getChildren().contains(messageBox)) {
                 messageContainer.getChildren().add(messageBox);
             }
         } catch (Exception e) {
             System.err.println("Failed to load image from local file: " + e.getMessage());
             e.printStackTrace();
-            // Fallback to file attachment
-            displayFileAttachmentFromLocal(messageBox, senderText, localFilePath);
+            imageContainer.getChildren().clear();
+            imageContainer.getChildren().add(senderLabel);
+            Label errorLabel = new Label("Failed to load image");
+            errorLabel.setStyle("-fx-text-fill: red;");
+            imageContainer.getChildren().add(errorLabel);
+            messageBox.getChildren().clear();
+            messageBox.getChildren().add(imageContainer);
         }
     }
     
@@ -1841,7 +1876,8 @@ public class ChatView extends BorderPane {
      * Only used for non-image files.
      */
     private void displayFileAttachmentFromLocal(HBox messageBox, String senderText, String localFilePath) {
-        // Create new sender label
+        messageBox.getChildren().clear();
+        
         Label senderLabel = new Label(senderText);
         senderLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333;");
         
@@ -1868,10 +1904,10 @@ public class ChatView extends BorderPane {
         fileContainer.getChildren().addAll(senderLabel, fileLabel);
         messageBox.getChildren().add(fileContainer);
         
-        // Only add messageBox to container if it's not already there
         if (!messageContainer.getChildren().contains(messageBox)) {
             messageContainer.getChildren().add(messageBox);
         }
     }
 }
+
 
