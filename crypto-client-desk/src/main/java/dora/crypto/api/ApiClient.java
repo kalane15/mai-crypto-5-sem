@@ -415,10 +415,14 @@ public class ApiClient {
 
     // File operations
     public CompletableFuture<FileUploadResponse> uploadFile(File file) {
+        return uploadFile(file, file.getName());
+    }
+    
+    public CompletableFuture<FileUploadResponse> uploadFile(File file, String originalFileName) {
         try {
             // Read file into byte array
             byte[] fileBytes = Files.readAllBytes(file.toPath());
-            String fileName = file.getName();
+            String fileName = originalFileName != null ? originalFileName : file.getName();
             
             // Create multipart form data
             String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();

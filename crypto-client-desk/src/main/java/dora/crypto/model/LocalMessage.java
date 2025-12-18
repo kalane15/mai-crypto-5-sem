@@ -22,6 +22,7 @@ public class LocalMessage {
     private String message;
     private String type; // "TEXT", "ENCRYPTED", "FILE", "ENCRYPTED_FILE"
     private LocalDateTime timestamp;
-    private String fileId; // For file messages
+    private String fileId; // Server file ID (for reference)
+    private String localFilePath; // Local path to downloaded file
 }
 

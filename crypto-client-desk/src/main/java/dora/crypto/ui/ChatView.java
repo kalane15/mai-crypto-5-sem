@@ -15,6 +15,8 @@ import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
@@ -32,6 +34,7 @@ import java.nio.file.Paths;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public class ChatView extends BorderPane {
     private final ApiClient apiClient;
@@ -58,6 +61,7 @@ public class ChatView extends BorderPane {
     private ProgressBar fileEncryptionProgress;
     private Label fileStatusLabel;
     private File selectedFile;
+    private String originalFileName; // Store original file name before encryption
     private Path encryptedFileWithIV; // Store encrypted file path after encryption
     private Task<Path> currentFileEncryptionTask; // Changed to return Path instead of String
     private MessageDatabase messageDatabase;
@@ -168,7 +172,40 @@ public class ChatView extends BorderPane {
                     
                 case "FILE":
                     // File link message - messageText contains just the fileId
-                    addMessageToUI(message.getSender(), "[File Attachment]", false, messageText);
+                    // Get file info first to check if it's an image, then download to local storage
+                    String receivedFileId = messageText;
+                    apiClient.getFileInfo(receivedFileId).thenAccept(fileInfo -> {
+                        String fileName = fileInfo != null ? fileInfo.getFileName() : null;
+                        // Download file to local storage
+                        downloadFileToLocalStorage(receivedFileId, fileName).thenAccept(localPath -> {
+                            Platform.runLater(() -> {
+                                addMessageToUI(message.getSender(), "", true, receivedFileId, localPath);
+                            });
+                        }).exceptionally(ex -> {
+                            System.err.println("Failed to download received file to local storage: " + ex.getMessage());
+                            ex.printStackTrace();
+                            // Still add message to UI even if download fails
+                            Platform.runLater(() -> {
+                                addMessageToUI(message.getSender(), "", true, receivedFileId, null);
+                            });
+                            return null;
+                        });
+                    }).exceptionally(ex -> {
+                        System.err.println("Failed to get file info: " + ex.getMessage());
+                        ex.printStackTrace();
+                        // Download without file info
+                        downloadFileToLocalStorage(receivedFileId, null).thenAccept(localPath -> {
+                            Platform.runLater(() -> {
+                                addMessageToUI(message.getSender(), "", true, receivedFileId, localPath);
+                            });
+                        }).exceptionally(ex2 -> {
+                            Platform.runLater(() -> {
+                                addMessageToUI(message.getSender(), "", true, receivedFileId, null);
+                            });
+                            return null;
+                        });
+                        return null;
+                    });
                     break;
                     
                 case "ENCRYPTED":
@@ -242,7 +279,41 @@ public class ChatView extends BorderPane {
                             
                             byte[] decrypted = cipher.decrypt(encrypted);
                             String fileId = new String(decrypted, "UTF-8");
-                            addMessageToUI(message.getSender(), "[ENCRYPTED FILE]", true, fileId);
+                            
+                            // Get file info first to check if it's an image, then download to local storage
+                            String encryptedFileId = fileId;
+                            apiClient.getFileInfo(encryptedFileId).thenAccept(fileInfo -> {
+                                String fileName = fileInfo != null ? fileInfo.getFileName() : null;
+                                // Download file to local storage
+                                downloadFileToLocalStorage(encryptedFileId, fileName).thenAccept(localPath -> {
+                                    Platform.runLater(() -> {
+                                        addMessageToUI(message.getSender(), "", true, encryptedFileId, localPath);
+                                    });
+                                }).exceptionally(ex -> {
+                                    System.err.println("Failed to download encrypted file to local storage: " + ex.getMessage());
+                                    ex.printStackTrace();
+                                    // Still add message to UI even if download fails
+                                    Platform.runLater(() -> {
+                                        addMessageToUI(message.getSender(), "", true, encryptedFileId, null);
+                                    });
+                                    return null;
+                                });
+                            }).exceptionally(ex -> {
+                                System.err.println("Failed to get file info: " + ex.getMessage());
+                                ex.printStackTrace();
+                                // Download without file info
+                                downloadFileToLocalStorage(encryptedFileId, null).thenAccept(localPath -> {
+                                    Platform.runLater(() -> {
+                                        addMessageToUI(message.getSender(), "", true, encryptedFileId, localPath);
+                                    });
+                                }).exceptionally(ex2 -> {
+                                    Platform.runLater(() -> {
+                                        addMessageToUI(message.getSender(), "", true, encryptedFileId, null);
+                                    });
+                                    return null;
+                                });
+                                return null;
+                            });
                         }
                     } catch (Exception e) {
                         addMessageToUI(message.getSender(), "[Failed to decrypt file: " + e.getMessage() + "]", false, null);
@@ -644,9 +715,13 @@ public class ChatView extends BorderPane {
     }
 
     private void addMessageToUI(String sender, String messageText, boolean isEncryptedFile, String fileId) {
+        addMessageToUI(sender, messageText, isEncryptedFile, fileId, null);
+    }
+    
+    private void addMessageToUI(String sender, String messageText, boolean isEncryptedFile, String fileId, String localFilePath) {
         // Save message to database (don't save system messages)
         if (!"System".equals(sender)) {
-            saveMessageToDatabase(sender, messageText, isEncryptedFile, fileId);
+            saveMessageToDatabase(sender, messageText, isEncryptedFile, fileId, localFilePath);
         }
         HBox messageBox = new HBox(10);
         messageBox.setPadding(new Insets(5, 10, 5, 10));
@@ -655,12 +730,312 @@ public class ChatView extends BorderPane {
         Label senderLabel = new Label(sender + ":");
         senderLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333;");
         
-        if (fileId != null) {
-            // File attachment message with download button
-            Label fileLabel = new Label(isEncryptedFile ? "[ENCRYPTED FILE]" : "[File Attachment]");
-            fileLabel.setStyle("-fx-text-fill: #666;");
+        if (fileId != null && !fileId.isEmpty()) {
+            // If we have a local file path, use it directly
+            if (localFilePath != null && !localFilePath.isEmpty() && Files.exists(Paths.get(localFilePath))) {
+                // File is already downloaded locally - check if it's an image
+                File localFile = new File(localFilePath);
+                String fileName = localFile.getName();
+                if (isImageFile(fileName)) {
+                    // Display image from local file
+                    displayImageFromLocalFile(messageBox, senderLabel, localFilePath);
+                } else {
+                    // Display file attachment with local path
+                    displayFileAttachmentFromLocal(messageBox, senderLabel, localFilePath);
+                }
+            } else {
+                // File not downloaded yet, check if it's an image and download if needed
+                System.out.println("Checking file for image display: fileId=" + fileId);
+                apiClient.getFileInfo(fileId).thenAccept(fileInfo -> {
+                    Platform.runLater(() -> {
+                        String fileName = fileInfo != null ? fileInfo.getFileName() : null;
+                        System.out.println("File info received: fileName=" + fileName + ", fileId=" + fileId);
+                        if (fileName != null && isImageFile(fileName)) {
+                            System.out.println("File is an image, displaying inline: " + fileName);
+                            // Display image inline
+                            displayImageInMessage(messageBox, senderLabel, fileId, isEncryptedFile, fileInfo);
+                        } else {
+                            System.out.println("File is not an image or fileName is null, showing as attachment: " + fileName);
+                            // Display file attachment with download button
+                            displayFileAttachment(messageBox, senderLabel, fileId, isEncryptedFile);
+                        }
+                    });
+                }).exceptionally(ex -> {
+                    // If we can't get file info, show as regular file attachment
+                    System.err.println("Failed to get file info for fileId=" + fileId + ": " + ex.getMessage());
+                    ex.printStackTrace();
+                    Platform.runLater(() -> {
+                        displayFileAttachment(messageBox, senderLabel, fileId, isEncryptedFile);
+                    });
+                    return null;
+                });
+            }
+        } else {
+            // Regular text message
+            Text messageLabel = new Text(messageText);
+            messageLabel.setWrappingWidth(600);
+            messageLabel.setStyle("-fx-font-family: monospace; -fx-fill: #333;");
             
-            Button downloadButton = new Button("⬇ Download");
+            messageBox.getChildren().addAll(senderLabel, messageLabel);
+            messageContainer.getChildren().add(messageBox);
+        }
+        
+        // Auto-scroll to bottom
+        Platform.runLater(() -> {
+            messageScrollPane.setVvalue(1.0);
+        });
+    }
+    
+    /**
+     * Checks if a file is an image based on its extension.
+     */
+    private boolean isImageFile(String fileName) {
+        if (fileName == null || fileName.isEmpty()) {
+            System.out.println("isImageFile: fileName is null or empty");
+            return false;
+        }
+        String lowerName = fileName.toLowerCase().trim();
+        boolean isImage = lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg") ||
+               lowerName.endsWith(".png") || lowerName.endsWith(".gif") ||
+               lowerName.endsWith(".bmp") || lowerName.endsWith(".webp") ||
+               lowerName.endsWith(".svg");
+        System.out.println("isImageFile check: fileName=" + fileName + ", lowerName=" + lowerName + ", isImage=" + isImage);
+        return isImage;
+    }
+    
+    /**
+     * Displays an image inline in the message.
+     */
+    private void displayImageInMessage(HBox messageBox, Label senderLabel, String fileId, 
+                                      boolean isEncryptedFile, FileInfo fileInfo) {
+        VBox imageContainer = new VBox(5);
+        imageContainer.setPadding(new Insets(5));
+        
+        // Add sender label
+        imageContainer.getChildren().add(senderLabel);
+        
+        // Create placeholder while loading
+        ProgressIndicator loadingIndicator = new ProgressIndicator();
+        loadingIndicator.setPrefSize(30, 30);
+        Label loadingLabel = new Label("Loading image...");
+        loadingLabel.setStyle("-fx-text-fill: #666; -fx-font-size: 11px;");
+        VBox loadingBox = new VBox(5, loadingIndicator, loadingLabel);
+        loadingBox.setAlignment(Pos.CENTER);
+        loadingBox.setPadding(new Insets(10));
+        imageContainer.getChildren().add(loadingBox);
+        
+        // Add to message container first
+        messageBox.getChildren().add(imageContainer);
+        messageContainer.getChildren().add(messageBox);
+        
+        // Download and decrypt image in background
+        Task<Image> imageLoadTask = new Task<Image>() {
+            @Override
+            protected Image call() throws Exception {
+                updateMessage("Downloading image...");
+                
+                // Files from server are always encrypted, so we need to decrypt them
+                // Files from DB are marked as unencrypted, but they're still encrypted on server
+                // So we always try to decrypt if key is available
+                boolean needsDecryption = (app.socket != null && app.socket.getKey() != null);
+                
+                if (needsDecryption && (app.socket == null || app.socket.getKey() == null)) {
+                    throw new IllegalStateException("Encryption key not available");
+                }
+                
+                // Download file
+                Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"));
+                Path tempFile = tempDir.resolve("image_" + fileId + "_" + System.currentTimeMillis());
+                
+                if (needsDecryption) {
+                    // File is encrypted on server (either explicitly marked or from DB)
+                    // Download and decrypt
+                    Path encryptedFileWithIV = tempDir.resolve("encrypted_with_iv_" + fileId);
+                    File tempEncryptedFile = encryptedFileWithIV.toFile();
+                    apiClient.downloadFile(fileId, tempEncryptedFile).get();
+                    
+                    // Extract IV and decrypt
+                    byte[] key = app.socket.getKey();
+                    dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
+                    int blockSize = blockCipher.blockSize();
+                    
+                    byte[] iv = new byte[blockSize];
+                    try (FileInputStream fis = new FileInputStream(tempEncryptedFile)) {
+                        int bytesRead = fis.read(iv);
+                        if (bytesRead != blockSize) {
+                            throw new IOException("Failed to read IV from encrypted file");
+                        }
+                    }
+                    
+                    // Create file without IV for decryption
+                    Path encryptedFile = tempDir.resolve("encrypted_" + fileId);
+                    try (FileInputStream fis = new FileInputStream(tempEncryptedFile);
+                         FileOutputStream fos = new FileOutputStream(encryptedFile.toFile())) {
+                        fis.skip(blockSize);
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = fis.read(buffer)) != -1) {
+                            fos.write(buffer, 0, bytesRead);
+                        }
+                    }
+                    Files.deleteIfExists(encryptedFileWithIV);
+                    
+                    // Decrypt file
+                    updateMessage("Decrypting image...");
+                    SymmetricCipher cipher = EncryptionUtil.createCipher(
+                        chat.getAlgorithm(),
+                        chat.getMode(),
+                        chat.getPadding(),
+                        key,
+                        iv
+                    );
+                    
+                    cipher.decryptFile(encryptedFile, tempFile);
+                    Files.deleteIfExists(encryptedFile);
+                } else {
+                    // No key available - try to download as unencrypted (shouldn't happen for files from server)
+                    File tempFileObj = tempFile.toFile();
+                    apiClient.downloadFile(fileId, tempFileObj).get();
+                }
+                
+                // Load image from file
+                updateMessage("Loading image...");
+                Image image = new Image("file:" + tempFile.toAbsolutePath().toString());
+                
+                // Clean up temp file after a delay (let image load first)
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(1000);
+                        Files.deleteIfExists(tempFile);
+                    } catch (Exception e) {
+                        // Ignore cleanup errors
+                    }
+                }).start();
+                
+                return image;
+            }
+        };
+        
+        imageLoadTask.setOnSucceeded(e -> {
+            Platform.runLater(() -> {
+                try {
+                    Image image = imageLoadTask.getValue();
+                    if (image != null && !image.isError()) {
+                        // Remove loading indicator
+                        imageContainer.getChildren().clear();
+                        imageContainer.getChildren().add(senderLabel);
+                        
+                        // Create ImageView with constraints
+                        ImageView imageView = new ImageView(image);
+                        // Set max dimensions (preserve aspect ratio)
+                        double maxWidth = 400;
+                        double maxHeight = 400;
+                        
+                        if (image.getWidth() > maxWidth || image.getHeight() > maxHeight) {
+                            if (image.getWidth() > image.getHeight()) {
+                                imageView.setFitWidth(maxWidth);
+                            } else {
+                                imageView.setFitHeight(maxHeight);
+                            }
+                            imageView.setPreserveRatio(true);
+                        }
+                        
+                        imageView.setSmooth(true);
+                        imageView.setCache(true);
+                        
+                        // Add download button as well
+                        Button downloadButton = createDownloadButton(fileId);
+                        HBox imageBox = new HBox(10);
+                        imageBox.setAlignment(Pos.CENTER_LEFT);
+                        imageBox.getChildren().addAll(imageView, downloadButton);
+                        
+                        imageContainer.getChildren().add(imageBox);
+                        
+                        // Add file name label
+                        Label fileNameLabel = new Label(fileInfo.getFileName());
+                        fileNameLabel.setStyle("-fx-text-fill: #999; -fx-font-size: 10px;");
+                        imageContainer.getChildren().add(fileNameLabel);
+                    } else {
+                        // Image failed to load, show error
+                        imageContainer.getChildren().clear();
+                        imageContainer.getChildren().add(senderLabel);
+                        Label errorLabel = new Label("Failed to load image");
+                        errorLabel.setStyle("-fx-text-fill: red;");
+                        imageContainer.getChildren().add(errorLabel);
+                        displayFileAttachment(messageBox, senderLabel, fileId, isEncryptedFile);
+                    }
+                } catch (Exception ex) {
+                    // Error loading image, fall back to file attachment
+                    imageContainer.getChildren().clear();
+                    displayFileAttachment(messageBox, senderLabel, fileId, isEncryptedFile);
+                }
+            });
+        });
+        
+        imageLoadTask.setOnFailed(e -> {
+            Platform.runLater(() -> {
+                // Remove loading indicator and show file attachment instead
+                imageContainer.getChildren().clear();
+                displayFileAttachment(messageBox, senderLabel, fileId, isEncryptedFile);
+            });
+        });
+        
+        new Thread(imageLoadTask).start();
+    }
+    
+    /**
+     * Displays a file attachment with download button (non-image files).
+     */
+    private void displayFileAttachment(HBox messageBox, Label senderLabel, String fileId, boolean isEncryptedFile) {
+        // Clear message box first
+        messageBox.getChildren().clear();
+        messageBox.getChildren().add(senderLabel);
+        
+        // File attachment message with download button
+        Label fileLabel = new Label(isEncryptedFile ? "[ENCRYPTED FILE]" : "[File Attachment]");
+        fileLabel.setStyle("-fx-text-fill: #666;");
+        
+        Button downloadButton = createDownloadButton(fileId);
+        
+        Label fileIdLabel = new Label("(" + fileId.substring(0, Math.min(8, fileId.length())) + "...)");
+        fileIdLabel.setStyle("-fx-text-fill: #999; -fx-font-size: 10px;");
+        
+        messageBox.getChildren().addAll(fileLabel, downloadButton, fileIdLabel);
+        
+        // Make sure message box is in container
+        if (!messageContainer.getChildren().contains(messageBox)) {
+            messageContainer.getChildren().add(messageBox);
+        }
+    }
+    
+    /**
+     * Creates a styled download button.
+     */
+    private Button createDownloadButton(String fileId) {
+        Button downloadButton = new Button("⬇ Download");
+        downloadButton.setStyle(
+            "-fx-background-color: #4CAF50; " +
+            "-fx-text-fill: white; " +
+            "-fx-font-weight: bold; " +
+            "-fx-padding: 8 15 8 15; " +
+            "-fx-background-radius: 5; " +
+            "-fx-cursor: hand;"
+        );
+        
+        // Hover effect
+        downloadButton.setOnMouseEntered(e -> {
+            downloadButton.setStyle(
+                "-fx-background-color: #45a049; " +
+                "-fx-text-fill: white; " +
+                "-fx-font-weight: bold; " +
+                "-fx-padding: 8 15 8 15; " +
+                "-fx-background-radius: 5; " +
+                "-fx-cursor: hand; " +
+                "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 5, 0, 0, 2);"
+            );
+        });
+        
+        downloadButton.setOnMouseExited(e -> {
             downloadButton.setStyle(
                 "-fx-background-color: #4CAF50; " +
                 "-fx-text-fill: white; " +
@@ -669,77 +1044,35 @@ public class ChatView extends BorderPane {
                 "-fx-background-radius: 5; " +
                 "-fx-cursor: hand;"
             );
-            
-            // Hover effect
-            downloadButton.setOnMouseEntered(e -> {
-                downloadButton.setStyle(
-                    "-fx-background-color: #45a049; " +
-                    "-fx-text-fill: white; " +
-                    "-fx-font-weight: bold; " +
-                    "-fx-padding: 8 15 8 15; " +
-                    "-fx-background-radius: 5; " +
-                    "-fx-cursor: hand; " +
-                    "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 5, 0, 0, 2);"
-                );
-            });
-            
-            downloadButton.setOnMouseExited(e -> {
-                downloadButton.setStyle(
-                    "-fx-background-color: #4CAF50; " +
-                    "-fx-text-fill: white; " +
-                    "-fx-font-weight: bold; " +
-                    "-fx-padding: 8 15 8 15; " +
-                    "-fx-background-radius: 5; " +
-                    "-fx-cursor: hand;"
-                );
-            });
-            
-            // Click effect
-            downloadButton.setOnMousePressed(e -> {
-                downloadButton.setStyle(
-                    "-fx-background-color: #3d8b40; " +
-                    "-fx-text-fill: white; " +
-                    "-fx-font-weight: bold; " +
-                    "-fx-padding: 8 15 8 15; " +
-                    "-fx-background-radius: 5; " +
-                    "-fx-cursor: hand; " +
-                    "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.2), 3, 0, 0, 1);"
-                );
-            });
-            
-            downloadButton.setOnMouseReleased(e -> {
-                downloadButton.setStyle(
-                    "-fx-background-color: #45a049; " +
-                    "-fx-text-fill: white; " +
-                    "-fx-font-weight: bold; " +
-                    "-fx-padding: 8 15 8 15; " +
-                    "-fx-background-radius: 5; " +
-                    "-fx-cursor: hand; " +
-                    "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 5, 0, 0, 2);"
-                );
-            });
-            
-            downloadButton.setOnAction(e -> handleFileDownload(fileId));
-            
-            Label fileIdLabel = new Label("(" + fileId.substring(0, 8) + "...)");
-            fileIdLabel.setStyle("-fx-text-fill: #999; -fx-font-size: 10px;");
-            
-            messageBox.getChildren().addAll(senderLabel, fileLabel, downloadButton, fileIdLabel);
-        } else {
-            // Regular text message
-            Text messageLabel = new Text(messageText);
-            messageLabel.setWrappingWidth(600);
-            messageLabel.setStyle("-fx-font-family: monospace; -fx-fill: #333;");
-            
-            messageBox.getChildren().addAll(senderLabel, messageLabel);
-        }
-        
-        messageContainer.getChildren().add(messageBox);
-        
-        // Auto-scroll to bottom
-        Platform.runLater(() -> {
-            messageScrollPane.setVvalue(1.0);
         });
+        
+        // Click effect
+        downloadButton.setOnMousePressed(e -> {
+            downloadButton.setStyle(
+                "-fx-background-color: #3d8b40; " +
+                "-fx-text-fill: white; " +
+                "-fx-font-weight: bold; " +
+                "-fx-padding: 8 15 8 15; " +
+                "-fx-background-radius: 5; " +
+                "-fx-cursor: hand; " +
+                "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.2), 3, 0, 0, 1);"
+            );
+        });
+        
+        downloadButton.setOnMouseReleased(e -> {
+            downloadButton.setStyle(
+                "-fx-background-color: #45a049; " +
+                "-fx-text-fill: white; " +
+                "-fx-font-weight: bold; " +
+                "-fx-padding: 8 15 8 15; " +
+                "-fx-background-radius: 5; " +
+                "-fx-cursor: hand; " +
+                "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 5, 0, 0, 2);"
+            );
+        });
+        
+        downloadButton.setOnAction(e -> handleFileDownload(fileId));
+        return downloadButton;
     }
 
     private void handleDisconnect() {
@@ -781,8 +1114,9 @@ public class ChatView extends BorderPane {
             return; // User cancelled
         }
 
-        // Store selected file
+        // Store selected file and original name
         selectedFile = file;
+        originalFileName = file.getName(); // Save original filename
         
         // Update UI
         encryptFileButton.setDisable(false);
@@ -971,8 +1305,11 @@ public class ChatView extends BorderPane {
                 updateProgress(-1, 1);
                 updateMessage("Uploading file...");
 
-                // Upload encrypted file
-                FileUploadResponse uploadResponse = apiClient.uploadFile(encryptedFileWithIV.toFile()).get();
+                // Upload encrypted file with original filename
+                FileUploadResponse uploadResponse = apiClient.uploadFile(
+                    encryptedFileWithIV.toFile(), 
+                    originalFileName != null ? originalFileName : encryptedFileWithIV.getFileName().toString()
+                ).get();
                 
                 // Clean up encrypted file after successful upload
                 Files.deleteIfExists(encryptedFileWithIV);
@@ -991,7 +1328,21 @@ public class ChatView extends BorderPane {
                 // Send file link via WebSocket with type "FILE"
                 if (app.socket != null && app.socket.isConnected()) {
                     app.socket.sendMessage(fileId, "FILE");
-                    addMessageToUI("You", "[File Attachment]", false, fileId);
+                    // Files are always encrypted before sending, so isEncryptedFile = true
+                    // Download file to local storage after sending
+                    downloadFileToLocalStorage(fileId, originalFileName).thenAccept(localPath -> {
+                        Platform.runLater(() -> {
+                            addMessageToUI("You", "", true, fileId, localPath);
+                        });
+                    }).exceptionally(ex -> {
+                        System.err.println("Failed to download file to local storage: " + ex.getMessage());
+                        ex.printStackTrace();
+                        // Still add message to UI even if download fails
+                        Platform.runLater(() -> {
+                            addMessageToUI("You", "", true, fileId, null);
+                        });
+                        return null;
+                    });
                 }
                 fileStatusLabel.setText("File uploaded and sent successfully!");
                 fileStatusLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: green;");
@@ -1027,6 +1378,7 @@ public class ChatView extends BorderPane {
         fileEncryptionProgress.setProgress(0);
         fileStatusLabel.setVisible(false);
         selectedFile = null;
+        originalFileName = null;
         encryptedFileWithIV = null;
         currentFileEncryptionTask = null;
     }
@@ -1044,6 +1396,69 @@ public class ChatView extends BorderPane {
     }
 
     private void handleFileDownload(String fileId) {
+        // Check if file is encrypted - we need to get file info first
+        // For now, we'll assume encrypted if key is available (backward compatibility)
+        // In practice, we should check the message type, but for download button we'll try
+        boolean needsDecryption = app.socket != null && app.socket.getKey() != null;
+        
+        if (!needsDecryption) {
+            // Try to download as unencrypted file
+            Task<Void> downloadTask = new Task<Void>() {
+                @Override
+                protected Void call() throws Exception {
+                    updateMessage("Downloading file...");
+                    FileInfo fileInfo = apiClient.getFileInfo(fileId).get();
+                    Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"));
+                    File tempFile = tempDir.resolve("file_" + fileId + "_" + System.currentTimeMillis()).toFile();
+                    apiClient.downloadFile(fileId, tempFile).get();
+                    
+                    Platform.runLater(() -> {
+                        FileChooser fileChooser = new FileChooser();
+                        fileChooser.setTitle("Save File");
+                        fileChooser.setInitialFileName(fileInfo.getFileName());
+                        Stage stage = (Stage) getScene().getWindow();
+                        File saveFile = fileChooser.showSaveDialog(stage);
+                        
+                        if (saveFile != null) {
+                            try {
+                                Files.copy(tempFile.toPath(), saveFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                                Files.deleteIfExists(tempFile.toPath());
+                                Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                                alert.setContentText("File saved to: " + saveFile.getAbsolutePath());
+                                alert.show();
+                            } catch (IOException ex) {
+                                Alert alert = new Alert(Alert.AlertType.ERROR);
+                                alert.setContentText("Failed to save file: " + ex.getMessage());
+                                alert.show();
+                            }
+                        } else {
+                            try {
+                                Files.deleteIfExists(tempFile.toPath());
+                            } catch (IOException ex) {
+                                // Ignore cleanup errors
+                            }
+                        }
+                        encryptionProgress.setVisible(false);
+                    });
+                    return null;
+                }
+            };
+            
+            downloadTask.setOnFailed(e -> {
+                Platform.runLater(() -> {
+                    Alert alert = new Alert(Alert.AlertType.ERROR);
+                    alert.setContentText("File download failed: " + downloadTask.getException().getMessage());
+                    alert.show();
+                    encryptionProgress.setVisible(false);
+                });
+            });
+            
+            encryptionProgress.setVisible(true);
+            new Thread(downloadTask).start();
+            return;
+        }
+        
+        // Encrypted file download (original logic)
         if (app.socket == null || app.socket.getKey() == null) {
             Alert alert = new Alert(Alert.AlertType.WARNING);
             alert.setContentText("Encryption key not available. Cannot decrypt file.");
@@ -1160,15 +1575,22 @@ public class ChatView extends BorderPane {
 
     /**
      * Save a message to the local database.
+     * Files received from server are always encrypted, so we save them with type "ENCRYPTED_FILE".
      */
     private void saveMessageToDatabase(String sender, String messageText, boolean isEncryptedFile, String fileId) {
+        saveMessageToDatabase(sender, messageText, isEncryptedFile, fileId, null);
+    }
+    
+    private void saveMessageToDatabase(String sender, String messageText, boolean isEncryptedFile, String fileId, String localFilePath) {
         try {
             // Determine message type and prepare message content
             String type;
             String messageContent = messageText;
             
-            if (fileId != null) {
-                type = isEncryptedFile ? "ENCRYPTED_FILE" : "FILE";
+            if (fileId != null && !fileId.isEmpty()) {
+                // Files from server are always encrypted, save as ENCRYPTED_FILE
+                // This allows us to distinguish them when loading from DB
+                type = "ENCRYPTED_FILE"; // Always mark as encrypted since files from server are encrypted
             } else if (messageText.startsWith("[ENCRYPTED]")) {
                 type = "ENCRYPTED";
                 // Store the actual encrypted content (remove the "[ENCRYPTED] " prefix if present)
@@ -1187,6 +1609,7 @@ public class ChatView extends BorderPane {
                     .type(type)
                     .timestamp(java.time.LocalDateTime.now())
                     .fileId(fileId)
+                    .localFilePath(localFilePath)
                     .build();
             
             messageDatabase.saveMessage(localMessage);
@@ -1198,23 +1621,31 @@ public class ChatView extends BorderPane {
 
     /**
      * Load messages from the local database and display them.
+     * Files from database: treat as unencrypted for display logic (they need to be decrypted when downloaded from server).
      */
     private void loadMessagesFromDatabase() {
         try {
             List<LocalMessage> messages = messageDatabase.loadMessages(chat.getId());
             Platform.runLater(() -> {
                 for (LocalMessage msg : messages) {
-                    // Determine if it's an encrypted file based on type
-                    boolean isEncryptedFile = "ENCRYPTED_FILE".equals(msg.getType());
+                    // Determine if it's a file message
+                    boolean isFile = "FILE".equals(msg.getType()) || "ENCRYPTED_FILE".equals(msg.getType());
                     String displayText = msg.getMessage();
                     
-                    // Add prefix for encrypted messages if needed
+                    // Add prefix for encrypted text messages if needed
                     if ("ENCRYPTED".equals(msg.getType()) && !displayText.startsWith("[ENCRYPTED]")) {
                         displayText = "[ENCRYPTED] " + displayText;
                     }
                     
                     // Display message without saving to database (it's already in the database)
-                    displayMessageInUI(msg.getSender(), displayText, isEncryptedFile, msg.getFileId());
+                    // Files from DB: use local file path if available, otherwise use fileId
+                    if (isFile && msg.getLocalFilePath() != null && !msg.getLocalFilePath().isEmpty()) {
+                        // Use local file path
+                        displayMessageInUIFromDB(msg.getSender(), displayText, msg.getLocalFilePath());
+                    } else {
+                        // Fallback to fileId (for old messages without local path)
+                        displayMessageInUI(msg.getSender(), displayText, false, isFile ? msg.getFileId() : null);
+                    }
                 }
             });
         } catch (Exception e) {
@@ -1226,10 +1657,15 @@ public class ChatView extends BorderPane {
     /**
      * Display a message in the UI without saving to database.
      * Used when loading messages from database.
+     * Files from database are considered unencrypted (isEncryptedFile = false) for display purposes,
+     * but they are still encrypted on the server and will be decrypted when downloaded.
      */
     private void displayMessageInUI(String sender, String messageText, boolean isEncryptedFile, String fileId) {
-        // This is the same as addMessageToUI but without the database save
-        // Copy the UI code from addMessageToUI
+        // Files loaded from database: treat as unencrypted for display (they were already processed)
+        // Note: Files are still encrypted on server, but we mark them as unencrypted here
+        // so displayImageInMessage won't try to decrypt them (they'll be handled as regular downloads)
+        boolean fileIsEncrypted = false; // Files from DB are treated as unencrypted
+        
         HBox messageBox = new HBox(10);
         messageBox.setPadding(new Insets(5, 10, 5, 10));
         messageBox.setAlignment(Pos.CENTER_LEFT);
@@ -1237,55 +1673,40 @@ public class ChatView extends BorderPane {
         Label senderLabel = new Label(sender + ":");
         senderLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333;");
         
-        if (fileId != null) {
-            // File attachment message with download button
-            Label fileLabel = new Label(isEncryptedFile ? "[ENCRYPTED FILE]" : "[File Attachment]");
-            fileLabel.setStyle("-fx-text-fill: #666;");
-            
-            Button downloadButton = new Button("⬇ Download");
-            downloadButton.setStyle(
-                "-fx-background-color: #4CAF50; " +
-                "-fx-text-fill: white; " +
-                "-fx-font-weight: bold; " +
-                "-fx-padding: 8 15 8 15; " +
-                "-fx-background-radius: 5; " +
-                "-fx-cursor: hand;"
-            );
-            
-            downloadButton.setOnMouseEntered(e -> {
-                downloadButton.setStyle(
-                    "-fx-background-color: #45a049; " +
-                    "-fx-text-fill: white; " +
-                    "-fx-font-weight: bold; " +
-                    "-fx-padding: 8 15 8 15; " +
-                    "-fx-background-radius: 5; " +
-                    "-fx-cursor: hand; " +
-                    "-fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.3), 5, 0, 0, 2);"
-                );
+        if (fileId != null && !fileId.isEmpty()) {
+            // Check if this is an image file
+            System.out.println("[displayMessageInUI] Checking file for image display: fileId=" + fileId + " (from DB, treated as unencrypted)");
+            apiClient.getFileInfo(fileId).thenAccept(fileInfo -> {
+                Platform.runLater(() -> {
+                    String fileName = fileInfo != null ? fileInfo.getFileName() : null;
+                    System.out.println("[displayMessageInUI] File info received: fileName=" + fileName + ", fileId=" + fileId);
+                    if (fileName != null && isImageFile(fileName)) {
+                        System.out.println("[displayMessageInUI] File is an image, displaying inline: " + fileName);
+                        // Display image inline (treated as unencrypted from DB, but will decrypt when downloading)
+                        displayImageInMessage(messageBox, senderLabel, fileId, fileIsEncrypted, fileInfo);
+                    } else {
+                        System.out.println("[displayMessageInUI] File is not an image or fileName is null, showing as attachment: " + fileName);
+                        // Display file attachment with download button
+                        displayFileAttachment(messageBox, senderLabel, fileId, fileIsEncrypted);
+                    }
+                });
+            }).exceptionally(ex -> {
+                System.err.println("[displayMessageInUI] Failed to get file info for fileId=" + fileId + ": " + ex.getMessage());
+                ex.printStackTrace();
+                // If we can't get file info, show as regular file attachment
+                Platform.runLater(() -> {
+                    displayFileAttachment(messageBox, senderLabel, fileId, fileIsEncrypted);
+                });
+                return null;
             });
-            
-            downloadButton.setOnMouseExited(e -> {
-                downloadButton.setStyle(
-                    "-fx-background-color: #4CAF50; " +
-                    "-fx-text-fill: white; " +
-                    "-fx-font-weight: bold; " +
-                    "-fx-padding: 8 15 8 15; " +
-                    "-fx-background-radius: 5; " +
-                    "-fx-cursor: hand;"
-                );
-            });
-            
-            downloadButton.setOnAction(e -> handleFileDownload(fileId));
-            
-            messageBox.getChildren().addAll(senderLabel, fileLabel, downloadButton);
         } else {
             // Regular text message
             Text messageTextNode = new Text(messageText);
             messageTextNode.setWrappingWidth(600);
+            messageTextNode.setStyle("-fx-font-family: monospace; -fx-fill: #333;");
             messageBox.getChildren().addAll(senderLabel, messageTextNode);
+            messageContainer.getChildren().add(messageBox);
         }
-        
-        messageContainer.getChildren().add(messageBox);
     }
 
     /**
@@ -1299,6 +1720,164 @@ public class ChatView extends BorderPane {
             System.err.println("Failed to delete messages from database: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+    
+    /**
+     * Download file to local storage after sending.
+     * Returns the local file path.
+     */
+    private CompletableFuture<String> downloadFileToLocalStorage(String fileId, String originalFileName) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                // Create local storage directory
+                Path storageDir = Paths.get(System.getProperty("user.home"), ".crypto-client", "files", chat.getId().toString());
+                Files.createDirectories(storageDir);
+                
+                // Generate local file name
+                String fileName = originalFileName != null ? originalFileName : "file_" + fileId;
+                Path localFile = storageDir.resolve(fileId + "_" + fileName);
+                
+                // Download encrypted file
+                Path encryptedFileWithIV = storageDir.resolve("encrypted_with_iv_" + fileId);
+                File tempEncryptedFile = encryptedFileWithIV.toFile();
+                apiClient.downloadFile(fileId, tempEncryptedFile).get();
+                
+                // Extract IV and decrypt
+                byte[] key = app.socket.getKey();
+                dora.crypto.block.BlockCipher blockCipher = EncryptionUtil.createBlockCipher(chat.getAlgorithm(), key);
+                int blockSize = blockCipher.blockSize();
+                
+                byte[] iv = new byte[blockSize];
+                try (FileInputStream fis = new FileInputStream(tempEncryptedFile)) {
+                    int bytesRead = fis.read(iv);
+                    if (bytesRead != blockSize) {
+                        throw new IOException("Failed to read IV from encrypted file");
+                    }
+                }
+                
+                // Create file without IV for decryption
+                Path encryptedFile = storageDir.resolve("encrypted_" + fileId);
+                try (FileInputStream fis = new FileInputStream(tempEncryptedFile);
+                     FileOutputStream fos = new FileOutputStream(encryptedFile.toFile())) {
+                    fis.skip(blockSize);
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = fis.read(buffer)) != -1) {
+                        fos.write(buffer, 0, bytesRead);
+                    }
+                }
+                Files.deleteIfExists(encryptedFileWithIV);
+                
+                // Decrypt file
+                SymmetricCipher cipher = EncryptionUtil.createCipher(
+                    chat.getAlgorithm(),
+                    chat.getMode(),
+                    chat.getPadding(),
+                    key,
+                    iv
+                );
+                
+                cipher.decryptFile(encryptedFile, localFile);
+                Files.deleteIfExists(encryptedFile);
+                
+                return localFile.toAbsolutePath().toString();
+            } catch (Exception e) {
+                System.err.println("Failed to download file to local storage: " + e.getMessage());
+                e.printStackTrace();
+                throw new RuntimeException(e);
+            }
+        });
+    }
+    
+    /**
+     * Display message from database with local file path.
+     */
+    private void displayMessageInUIFromDB(String sender, String messageText, String localFilePath) {
+        HBox messageBox = new HBox(10);
+        messageBox.setPadding(new Insets(5, 10, 5, 10));
+        messageBox.setAlignment(Pos.CENTER_LEFT);
+        
+        Label senderLabel = new Label(sender + ":");
+        senderLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #333;");
+        
+        if (localFilePath != null && !localFilePath.isEmpty() && Files.exists(Paths.get(localFilePath))) {
+            File localFile = new File(localFilePath);
+            String fileName = localFile.getName();
+            if (isImageFile(fileName)) {
+                // Display image from local file
+                displayImageFromLocalFile(messageBox, senderLabel, localFilePath);
+            } else {
+                // Display file attachment with local path
+                displayFileAttachmentFromLocal(messageBox, senderLabel, localFilePath);
+            }
+        } else {
+            // Regular text message
+            Text messageTextNode = new Text(messageText);
+            messageTextNode.setWrappingWidth(600);
+            messageTextNode.setStyle("-fx-font-family: monospace; -fx-fill: #333;");
+            messageBox.getChildren().addAll(senderLabel, messageTextNode);
+            messageContainer.getChildren().add(messageBox);
+        }
+    }
+    
+    /**
+     * Display image from local file.
+     */
+    private void displayImageFromLocalFile(HBox messageBox, Label senderLabel, String localFilePath) {
+        VBox imageContainer = new VBox(5);
+        imageContainer.setPadding(new Insets(5));
+        
+        // Add sender label
+        imageContainer.getChildren().add(senderLabel);
+        
+        // Load image from local file
+        try {
+            Image image = new Image("file:" + localFilePath);
+            ImageView imageView = new ImageView(image);
+            imageView.setFitWidth(400);
+            imageView.setFitHeight(400);
+            imageView.setPreserveRatio(true);
+            imageView.setSmooth(true);
+            
+            imageContainer.getChildren().add(imageView);
+            messageBox.getChildren().add(imageContainer);
+            messageContainer.getChildren().add(messageBox);
+        } catch (Exception e) {
+            System.err.println("Failed to load image from local file: " + e.getMessage());
+            e.printStackTrace();
+            // Fallback to file attachment
+            displayFileAttachmentFromLocal(messageBox, senderLabel, localFilePath);
+        }
+    }
+    
+    /**
+     * Display file attachment from local file.
+     * Only used for non-image files.
+     */
+    private void displayFileAttachmentFromLocal(HBox messageBox, Label senderLabel, String localFilePath) {
+        VBox fileContainer = new VBox(5);
+        fileContainer.setPadding(new Insets(5));
+        
+        File localFile = new File(localFilePath);
+        String fileName = localFile.getName();
+        long fileSize = localFile.length();
+        
+        Label fileLabel = new Label(fileName + " (" + formatFileSize(fileSize) + ")");
+        fileLabel.setStyle("-fx-text-fill: #0066cc; -fx-underline: true;");
+        fileLabel.setOnMouseClicked(e -> {
+            try {
+                java.awt.Desktop.getDesktop().open(localFile);
+            } catch (Exception ex) {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setContentText("Failed to open file: " + ex.getMessage());
+                alert.show();
+            }
+        });
+        fileLabel.setCursor(javafx.scene.Cursor.HAND);
+        
+        fileContainer.getChildren().addAll(senderLabel, fileLabel);
+        messageBox.getChildren().add(fileContainer);
+        messageContainer.getChildren().add(messageBox);
     }
 }
 

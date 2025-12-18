@@ -65,7 +65,8 @@ public class MessageDatabase {
                     message TEXT NOT NULL,
                     type VARCHAR(50),
                     timestamp TIMESTAMP NOT NULL,
-                    file_id VARCHAR(255)
+                    file_id VARCHAR(255),
+                    local_file_path TEXT
                 )
                 """;
         } else {
@@ -78,13 +79,24 @@ public class MessageDatabase {
                     message TEXT NOT NULL,
                     type TEXT,
                     timestamp TEXT NOT NULL,
-                    file_id TEXT
+                    file_id TEXT,
+                    local_file_path TEXT
                 )
                 """;
         }
 
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createTableSQL);
+        }
+        
+        // Add local_file_path column if it doesn't exist (for existing databases)
+        try {
+            String alterSQL = "ALTER TABLE messages ADD COLUMN local_file_path TEXT";
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute(alterSQL);
+            }
+        } catch (SQLException e) {
+            // Column already exists, ignore
         }
 
         // Create index on chat_id for faster queries
@@ -98,7 +110,7 @@ public class MessageDatabase {
      * Save a message to the database.
      */
     public void saveMessage(LocalMessage localMessage) {
-        String sql = "INSERT INTO messages (chat_id, sender, receiver, message, type, timestamp, file_id) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO messages (chat_id, sender, receiver, message, type, timestamp, file_id, local_file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setLong(1, localMessage.getChatId());
@@ -115,6 +127,7 @@ public class MessageDatabase {
             }
             
             pstmt.setString(7, localMessage.getFileId());
+            pstmt.setString(8, localMessage.getLocalFilePath());
             pstmt.executeUpdate();
         } catch (SQLException e) {
             System.err.println("Failed to save message: " + e.getMessage());
@@ -127,7 +140,7 @@ public class MessageDatabase {
      */
     public List<LocalMessage> loadMessages(Long chatId) {
         List<LocalMessage> messages = new ArrayList<>();
-        String sql = "SELECT id, chat_id, sender, receiver, message, type, timestamp, file_id FROM messages WHERE chat_id = ? ORDER BY timestamp ASC";
+        String sql = "SELECT id, chat_id, sender, receiver, message, type, timestamp, file_id, local_file_path FROM messages WHERE chat_id = ? ORDER BY timestamp ASC";
         
         try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
             pstmt.setLong(1, chatId);
@@ -153,6 +166,7 @@ public class MessageDatabase {
                         .type(rs.getString("type"))
                         .timestamp(timestamp)
                         .fileId(rs.getString("file_id"))
+                        .localFilePath(rs.getString("local_file_path"))
                         .build();
                 
                 messages.add(msg);
