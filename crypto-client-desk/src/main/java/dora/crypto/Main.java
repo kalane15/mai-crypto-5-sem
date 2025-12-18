@@ -9,6 +9,8 @@ import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 
 public class Main extends Application {
@@ -48,7 +50,37 @@ public class Main extends Application {
         stage.setTitle("Crypto Chat Client");
         stage.setMinWidth(800);
         stage.setMinHeight(600);
+        
+        stage.setOnCloseRequest(e -> {
+            cleanupOnExit();
+        });
+        
         stage.show();
+    }
+    
+    @Override
+    public void stop() {
+        cleanupOnExit();
+    }
+    
+    private void cleanupOnExit() {
+        if (currentChatView != null && currentChatView.getChat() != null) {
+            try {
+                Long chatId = currentChatView.getChat().getId();
+                manageDisconnect();
+                try {
+                    CompletableFuture<Void> disconnectFuture = apiClient.disconnectFromChat(chatId);
+                    disconnectFuture.get(2, TimeUnit.SECONDS);
+                    System.out.println("Disconnected from chat " + chatId + " on application exit");
+                } catch (Exception ex) {
+                    System.err.println("Error disconnecting from chat on exit: " + ex.getMessage());
+                }
+            } catch (Exception ex) {
+                System.err.println("Error during cleanup on exit: " + ex.getMessage());
+            }
+        } else if (socket != null) {
+            manageDisconnect();
+        }
     }
 
     private void showAuthView() {
