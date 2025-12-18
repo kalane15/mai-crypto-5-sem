@@ -39,10 +39,6 @@ public class ApiClient {
         this.objectMapper = new ObjectMapper();
     }
 
-    /**
-     * Sets a callback to be invoked when the token becomes invalid (401/403).
-     * The callback receives the error message.
-     */
     public void setOnTokenInvalid(Consumer<String> callback) {
         this.onTokenInvalidCallback = callback;
     }
@@ -67,23 +63,17 @@ public class ApiClient {
         if (authToken != null && !authToken.isEmpty()) {
             builder.header("Authorization", "Bearer " + authToken);
             System.out.println("DEBUG: Sending request to " + endpoint + " with Authorization header");
-        } else {
-            System.err.println("WARNING: No auth token available for request to " + endpoint);
         }
 
         return builder;
     }
 
-    /**
-     * Extracts error message from response body, handling JSON and plain text responses.
-     */
     private String extractErrorMessage(String responseBody) {
         if (responseBody == null || responseBody.trim().isEmpty()) {
             return null;
         }
         
         try {
-            // Try to parse as JSON and extract message field
             var jsonNode = objectMapper.readTree(responseBody);
             if (jsonNode.has("message")) {
                 return jsonNode.get("message").asText();
@@ -91,10 +81,8 @@ public class ApiClient {
             if (jsonNode.has("error")) {
                 return jsonNode.get("error").asText();
             }
-            // If it's JSON but no message field, return the whole body as string
             return responseBody;
         } catch (Exception e) {
-            // Not JSON, return as-is (might be plain text error message)
             return responseBody;
         }
     }
@@ -116,13 +104,11 @@ public class ApiClient {
         return false;
     }
 
-    // Authentication
     public CompletableFuture<AuthResponse> signUp(String username, String password) {
         try {
             SignUpRequest request = new SignUpRequest(username, password);
             String jsonBody = objectMapper.writeValueAsString(request);
 
-            // Auth endpoints don't need tokens
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(BASE_URL + "/auth/sign-up"))
                     .timeout(Duration.ofSeconds(30))
@@ -140,7 +126,6 @@ public class ApiClient {
                                 throw new RuntimeException("Failed to parse response", e);
                             }
                         } else {
-                            // Extract error message from response body if available
                             String errorMessage = extractErrorMessage(response.body());
                             throw new RuntimeException(errorMessage != null ? errorMessage : "Sign up failed");
                         }
@@ -155,7 +140,6 @@ public class ApiClient {
             SignInRequest request = new SignInRequest(username, password);
             String jsonBody = objectMapper.writeValueAsString(request);
 
-            // Auth endpoints don't need tokens
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(BASE_URL + "/auth/sign-in"))
                     .timeout(Duration.ofSeconds(30))
@@ -172,7 +156,6 @@ public class ApiClient {
                                 throw new RuntimeException("Failed to parse response", e);
                             }
                         } else {
-                            // Extract error message from response body if available
                             String errorMessage = extractErrorMessage(response.body());
                             throw new RuntimeException(errorMessage != null ? errorMessage : "Sign in failed");
                         }
@@ -297,7 +280,6 @@ public class ApiClient {
                 });
     }
 
-    // Chats
     public CompletableFuture<Chat> createChat(Long contactId, String algorithm, String mode, String padding) {
         try {
             ChatRequest request = new ChatRequest(contactId, algorithm, mode, padding);
@@ -320,7 +302,6 @@ public class ApiClient {
                                 throw new RuntimeException("Failed to parse chat response", e);
                             }
                         } else {
-                            // Extract user-friendly error message from response
                             String errorMessage = extractErrorMessage(response.body());
                             if (errorMessage != null && !errorMessage.isEmpty()) {
                                 throw new RuntimeException(errorMessage);
@@ -413,18 +394,15 @@ public class ApiClient {
                 });
     }
 
-    // File operations
     public CompletableFuture<FileUploadResponse> uploadFile(File file) {
         return uploadFile(file, file.getName());
     }
     
     public CompletableFuture<FileUploadResponse> uploadFile(File file, String originalFileName) {
         try {
-            // Read file into byte array
             byte[] fileBytes = Files.readAllBytes(file.toPath());
             String fileName = originalFileName != null ? originalFileName : file.getName();
             
-            // Create multipart form data
             String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
             String CRLF = "\r\n";
             
@@ -434,7 +412,6 @@ public class ApiClient {
             formData.append("Content-Type: application/octet-stream").append(CRLF);
             formData.append(CRLF);
             
-            // Combine form data header and file content
             byte[] headerBytes = formData.toString().getBytes("UTF-8");
             byte[] footerBytes = (CRLF + "--" + boundary + "--" + CRLF).getBytes("UTF-8");
             

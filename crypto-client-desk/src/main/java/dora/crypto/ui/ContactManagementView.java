@@ -17,7 +17,6 @@ public class ContactManagementView extends VBox {
     public ContactManagementView(ApiClient apiClient) {
         this.apiClient = apiClient;
         createView();
-        // Don't load contacts in constructor - wait until after authentication
     }
 
     private void createView() {
@@ -27,7 +26,6 @@ public class ContactManagementView extends VBox {
         Label titleLabel = new Label("Contact Management");
         titleLabel.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
 
-        // Add contact section
         HBox addContactBox = new HBox(10);
         addContactField = new TextField();
         addContactField.setPromptText("Enter username to add");
@@ -35,12 +33,10 @@ public class ContactManagementView extends VBox {
         addButton.setOnAction(e -> handleAddContact());
         addContactBox.getChildren().addAll(addContactField, addButton);
 
-        // Contact list
         contactListView = new ListView<>();
         contactListView.setPrefHeight(300);
         contactListView.setCellFactory(param -> new ContactListCell(apiClient, this));
 
-        // Action buttons
         HBox actionBox = new HBox(10);
         Button refreshButton = new Button("Refresh");
         refreshButton.setOnAction(e -> loadContacts());
@@ -146,15 +142,12 @@ public class ContactManagementView extends VBox {
             buttonBox.getChildren().clear();
 
             if ("PENDING".equals(contact.getStatus())) {
-                // Check if this contact request was sent by the current user
                 Boolean isSentByMe = contact.getIsSentByMe();
                 if (isSentByMe != null && isSentByMe) {
-                    // For pending contacts sent by current user, show Cancel button
                     Button cancelButton = new Button("Cancel");
                     cancelButton.setOnAction(e -> handleCancel(contact));
                     buttonBox.getChildren().add(cancelButton);
                 } else {
-                    // For pending contacts received by current user, show Confirm and Reject buttons
                     Button confirmButton = new Button("Confirm");
                     confirmButton.setOnAction(e -> handleConfirm(contact));
                     Button rejectButton = new Button("Reject");
@@ -162,7 +155,6 @@ public class ContactManagementView extends VBox {
                     buttonBox.getChildren().addAll(confirmButton, rejectButton);
                 }
             } else {
-                // For confirmed contacts, show only Delete button
                 Button deleteButton = new Button("Delete");
                 deleteButton.setOnAction(e -> handleDelete(contact));
                 buttonBox.getChildren().add(deleteButton);
@@ -198,7 +190,6 @@ public class ContactManagementView extends VBox {
         }
 
         private void handleCancel(Contact contact) {
-            // Cancel a contact request sent by the current user (delete it)
             apiClient.deleteContact(contact.getId())
                     .thenRun(() -> Platform.runLater(() -> parentView.loadContacts()))
                     .exceptionally(ex -> {
@@ -231,9 +222,6 @@ public class ContactManagementView extends VBox {
             });
         }
         
-        /**
-         * Returns a general error message for alerts, hiding technical details and status codes.
-         */
         private String getGeneralErrorMessage(Throwable ex) {
             if (ex == null) {
                 return "Invalid action";
@@ -249,7 +237,6 @@ public class ContactManagementView extends VBox {
                 return "Invalid action";
             }
 
-            // Check if message contains status codes (e.g., "400", "500", "404", etc.)
             if (message.matches(".*\\b\\d{3}\\b.*") || 
                 message.contains("status code") || 
                 message.contains("StatusCode") ||
@@ -257,29 +244,22 @@ public class ContactManagementView extends VBox {
                 return "Invalid action";
             }
 
-            // Check for specific user-friendly messages that should be shown
             String lowerMessage = message.toLowerCase();
             
-            // User not found - this is user-friendly
             if (lowerMessage.contains("user not found") || 
                 lowerMessage.contains("пользователь не найден")) {
                 return "User not found. Please check the username and try again.";
             }
 
-            // Unauthorized - show friendly message
             if (lowerMessage.contains("unauthorized") || 
                 lowerMessage.contains("session expired")) {
                 return "Session expired. Please sign in again.";
             }
 
-            // For all other errors, show generic message
             return "Invalid action";
         }
     }
 
-    /**
-     * Extracts and formats user-friendly error messages for contact operations.
-     */
     private String getContactErrorMessage(Throwable ex) {
         if (ex == null) {
             return "Failed to add contact. Please try again.";
@@ -298,37 +278,31 @@ public class ContactManagementView extends VBox {
         // Check for specific error patterns
         String lowerMessage = message.toLowerCase();
         
-        // User not found
         if (lowerMessage.contains("user not found") || 
             lowerMessage.contains("пользователь не найден") ||
             lowerMessage.contains("username not found")) {
             return "User not found. Please check the username and try again.";
         }
 
-        // Cannot add yourself
         if (lowerMessage.contains("cannot add yourself") ||
             lowerMessage.contains("add yourself")) {
             return "You cannot add yourself as a contact.";
         }
 
-        // Contact already exists
         if (lowerMessage.contains("contact already exists") ||
             lowerMessage.contains("already exists")) {
             return "This contact already exists in your contact list.";
         }
 
-        // Contact request already exists
         if (lowerMessage.contains("contact request already exists") ||
             lowerMessage.contains("request already exists")) {
             return "A contact request from this user already exists.";
         }
 
-        // Unauthorized - don't show this as a contact error, it's an auth issue
         if (lowerMessage.contains("unauthorized")) {
             return "Session expired. Please sign in again.";
         }
 
-        // Return the original message if it's already user-friendly, otherwise provide a generic message
         return message;
     }
 }

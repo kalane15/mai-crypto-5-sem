@@ -43,7 +43,6 @@ public class MainView extends BorderPane {
 
         tabPane.getTabs().addAll(contactsTab, chatsTab);
 
-        // Add listener to refresh data when tabs are selected
         tabPane.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
             if (newTab != null) {
                 if (newTab.getContent() instanceof ContactManagementView) {
@@ -66,12 +65,10 @@ public class MainView extends BorderPane {
         if (welcomeLabel != null) {
             welcomeLabel.setText("Welcome, " + username + "!");
         }
-        // Load data after authentication succeeds
         loadInitialData();
     }
 
     private void loadInitialData() {
-        // Load data for all tabs
         for (Tab tab : tabPane.getTabs()) {
             if (tab.getContent() instanceof ContactManagementView) {
                 ((ContactManagementView) tab.getContent()).loadContacts();
@@ -84,7 +81,6 @@ public class MainView extends BorderPane {
     }
 
     public void refreshChats() {
-        // Refresh data for all tabs
         for (Tab tab : tabPane.getTabs()) {
             if (tab.getContent() instanceof ChatManagementView) {
                 ChatManagementView chatView = (ChatManagementView) tab.getContent();
@@ -95,7 +91,6 @@ public class MainView extends BorderPane {
 
     private void handleLogout() {
         apiClient.clearAuthToken();
-        // This will be handled by the main application to switch back to auth view
         fireEvent(new javafx.event.Event(MainView.LOGOUT_EVENT));
     }
 

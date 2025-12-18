@@ -25,7 +25,6 @@ public class ChatManagementView extends VBox {
         this.apiClient = apiClient;
         ChatManagementView.app = app;
         createView();
-        // Don't load data in constructor - wait until after authentication
     }
 
     private void createView() {
@@ -35,20 +34,15 @@ public class ChatManagementView extends VBox {
         Label titleLabel = new Label("Secret Chat Management");
         titleLabel.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
 
-        // Create chat section
         VBox createChatBox = createCreateChatSection();
 
-        // Chat list
         chatListView = new ListView<>();
         chatListView.setPrefHeight(300);
         chatListView.setCellFactory(param -> new ChatListCell(apiClient, this));
 
-        // Action buttons
         HBox actionBox = new HBox(10);
         Button refreshButton = new Button("Refresh");
-        refreshButton.setOnAction(e -> {
-            updateFull();
-        });
+        refreshButton.setOnAction(e -> updateFull());
         actionBox.getChildren().add(refreshButton);
 
         statusLabel = new Label();
@@ -76,11 +70,9 @@ public class ChatManagementView extends VBox {
         grid.setVgap(10);
         grid.setPadding(new Insets(10));
 
-        // Contact selection
         grid.add(new Label("Contact:"), 0, 0);
         contactComboBox = new ComboBox<>();
         contactComboBox.setPrefWidth(200);
-        // Set cell factory to display username
         contactComboBox.setCellFactory(param -> new ListCell<Contact>() {
             @Override
             protected void updateItem(Contact contact, boolean empty) {
@@ -92,7 +84,6 @@ public class ChatManagementView extends VBox {
                 }
             }
         });
-        // Set button cell to display username when selected
         contactComboBox.setButtonCell(new ListCell<Contact>() {
             @Override
             protected void updateItem(Contact contact, boolean empty) {
@@ -106,21 +97,18 @@ public class ChatManagementView extends VBox {
         });
         grid.add(contactComboBox, 1, 0);
 
-        // Algorithm selection
         grid.add(new Label("Algorithm:"), 0, 1);
         algorithmComboBox = new ComboBox<>();
         algorithmComboBox.getItems().addAll("MARS", "RC5");
         algorithmComboBox.setValue("MARS");
         grid.add(algorithmComboBox, 1, 1);
 
-        // Mode selection
         grid.add(new Label("Mode:"), 0, 2);
         modeComboBox = new ComboBox<>();
         modeComboBox.getItems().addAll("CBC", "CFB", "CTR", "ECB", "OFB", "PCBC", "RANDOM_DELTA");
         modeComboBox.setValue("CBC");
         grid.add(modeComboBox, 1, 2);
 
-        // Padding selection
         grid.add(new Label("Padding:"), 0, 3);
         paddingComboBox = new ComboBox<>();
         paddingComboBox.getItems().addAll("ANSI_X923", "ISO_10126", "PKCS7", "ZEROS");
@@ -140,7 +128,6 @@ public class ChatManagementView extends VBox {
                 .thenAccept(contacts -> {
                     Platform.runLater(() -> {
                         contactComboBox.getItems().clear();
-                        // Only show confirmed contacts
                         contacts.stream()
                                 .filter(c -> "CONFIRMED".equals(c.getStatus()))
                                 .forEach(c -> contactComboBox.getItems().add(c));
@@ -187,9 +174,6 @@ public class ChatManagementView extends VBox {
                 });
     }
 
-    /**
-     * Extracts and formats user-friendly error messages for chat creation errors.
-     */
     private String getChatErrorMessage(Throwable ex) {
         if (ex == null) {
             return "Failed to create chat. Please try again.";
@@ -205,31 +189,25 @@ public class ChatManagementView extends VBox {
             return "Failed to create chat. Please try again.";
         }
 
-        // Check for specific error patterns
         String lowerMessage = message.toLowerCase();
         
-        // Chat already exists
         if (lowerMessage.contains("chat already exists") || 
             lowerMessage.contains("chat already exists with this contact")) {
             return "A chat with this contact already exists. Please select a different contact or use the existing chat.";
         }
 
-        // Contact not found
         if (lowerMessage.contains("contact not found")) {
             return "The selected contact was not found. Please refresh and try again.";
         }
 
-        // Contact not confirmed
         if (lowerMessage.contains("contact must be confirmed")) {
             return "The selected contact must be confirmed before creating a chat.";
         }
 
-        // Permission errors
         if (lowerMessage.contains("can only create chats with your contacts")) {
             return "You can only create chats with your contacts.";
         }
 
-        // Return the original message if it's already user-friendly, otherwise provide a generic message
         return message;
     }
 
@@ -309,7 +287,6 @@ public class ChatManagementView extends VBox {
                 buttonBox.getChildren().add(disconnectButton);
             }
 
-            // Add delete button for all chats
             Button deleteButton = new Button("Delete");
             deleteButton.setStyle("-fx-background-color: #ff4444; -fx-text-fill: white;");
             deleteButton.setOnAction(e -> handleDelete(chat));
@@ -328,7 +305,6 @@ public class ChatManagementView extends VBox {
         }
 
         private void handleDisconnect(Chat chat) {
-            // Disconnect socket if it's for this chat
             if (app.socket != null && app.socket.getChat() != null && app.socket.getChat().getId().equals(chat.getId())) {
                 app.manageDisconnect();
             }
@@ -346,7 +322,6 @@ public class ChatManagementView extends VBox {
         }
 
         private void handleDelete(Chat chat) {
-            // Show confirmation dialog
             Alert confirmAlert = new Alert(Alert.AlertType.CONFIRMATION);
             confirmAlert.setTitle("Delete Chat");
             confirmAlert.setHeaderText("Delete Secret Chat");
@@ -356,17 +331,14 @@ public class ChatManagementView extends VBox {
                 if (response == ButtonType.OK) {
                     apiClient.deleteChat(chat.getId())
                             .thenRun(() -> Platform.runLater(() -> {
-                                // If user is currently viewing this chat, delete messages and switch to main view
                                 if (app.currentChatView != null) {
                                     try {
                                         var currentChat = app.currentChatView.getChat();
                                         if (currentChat != null && currentChat.getId().equals(chat.getId())) {
-                                            // Delete messages from database before switching views
                                             app.currentChatView.deleteChatMessages();
                                             app.showMainView();
                                         }
                                     } catch (Exception e) {
-                                        // Chat view might be invalid, just switch to main view
                                         app.showMainView();
                                     }
                                 }
