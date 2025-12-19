@@ -8,7 +8,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
 import java.math.BigInteger;
 
 @Entity
@@ -55,10 +54,18 @@ public class Chat {
     private BigInteger g;
 
     @Column(nullable = false)
+    @Builder.Default
     private boolean connectedUser1 = false;
 
     @Column(nullable = false)
+    @Builder.Default
     private boolean connectedUser2 = false;
+
+    @Column
+    private Integer rc5WordSize;
+
+    @Column
+    private Integer rc5Rounds;
 
 
     public enum ChatStatus {

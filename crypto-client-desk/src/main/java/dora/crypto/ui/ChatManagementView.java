@@ -18,6 +18,9 @@ public class ChatManagementView extends VBox {
     private ComboBox<String> algorithmComboBox;
     private ComboBox<String> modeComboBox;
     private ComboBox<String> paddingComboBox;
+    private ComboBox<String> rc5WordSizeComboBox;
+    private TextField rc5RoundsField;
+    private VBox rc5ParamsBox;
     private Label statusLabel;
     private static Main app;
 
@@ -101,6 +104,7 @@ public class ChatManagementView extends VBox {
         algorithmComboBox = new ComboBox<>();
         algorithmComboBox.getItems().addAll("MARS", "RC5");
         algorithmComboBox.setValue("MARS");
+        algorithmComboBox.setOnAction(e -> updateRC5ParamsVisibility());
         grid.add(algorithmComboBox, 1, 1);
 
         grid.add(new Label("Mode:"), 0, 2);
@@ -115,9 +119,43 @@ public class ChatManagementView extends VBox {
         paddingComboBox.setValue("PKCS7");
         grid.add(paddingComboBox, 1, 3);
 
+        rc5ParamsBox = new VBox(5);
+        rc5ParamsBox.setPadding(new Insets(5));
+        rc5ParamsBox.setStyle("-fx-border-color: #cccccc; -fx-border-radius: 3; -fx-padding: 5;");
+        
+        Label rc5ParamsLabel = new Label("RC5 Parameters:");
+        rc5ParamsLabel.setStyle("-fx-font-weight: bold;");
+        rc5ParamsBox.getChildren().add(rc5ParamsLabel);
+        
+        GridPane rc5Grid = new GridPane();
+        rc5Grid.setHgap(10);
+        rc5Grid.setVgap(5);
+        
+        rc5Grid.add(new Label("Word Size:"), 0, 0);
+        rc5WordSizeComboBox = new ComboBox<>();
+        rc5WordSizeComboBox.getItems().addAll("16", "32", "64");
+        rc5WordSizeComboBox.setValue("32");
+        rc5Grid.add(rc5WordSizeComboBox, 1, 0);
+        
+        rc5Grid.add(new Label("Rounds:"), 0, 1);
+        rc5RoundsField = new TextField("12");
+        rc5RoundsField.setPrefWidth(100);
+        rc5RoundsField.textProperty().addListener((observable, oldValue, newValue) -> {
+            if (!newValue.matches("\\d*")) {
+                rc5RoundsField.setText(oldValue);
+            }
+        });
+        rc5Grid.add(rc5RoundsField, 1, 1);
+        
+        rc5ParamsBox.getChildren().add(rc5Grid);
+        rc5ParamsBox.setVisible(false);
+        grid.add(rc5ParamsBox, 0, 4, 2, 1);
+
         Button createButton = new Button("Create Chat");
         createButton.setOnAction(e -> handleCreateChat());
-        grid.add(createButton, 1, 4);
+        grid.add(createButton, 1, 5);
+        
+        updateRC5ParamsVisibility();
 
         box.getChildren().addAll(sectionLabel, grid);
         return box;
@@ -142,6 +180,12 @@ public class ChatManagementView extends VBox {
                 });
     }
 
+    private void updateRC5ParamsVisibility() {
+        boolean isRC5 = "RC5".equals(algorithmComboBox.getValue());
+        rc5ParamsBox.setVisible(isRC5);
+        rc5ParamsBox.setManaged(isRC5);
+    }
+
     private void handleCreateChat() {
         Contact selectedContact = contactComboBox.getSelectionModel().getSelectedItem();
         if (selectedContact == null) {
@@ -153,10 +197,40 @@ public class ChatManagementView extends VBox {
         String mode = modeComboBox.getValue();
         String padding = paddingComboBox.getValue();
 
+        Integer rc5WordSize = null;
+        Integer rc5Rounds = null;
+        
+        if ("RC5".equals(algorithm)) {
+            String wordSizeStr = rc5WordSizeComboBox.getValue();
+            if (wordSizeStr != null) {
+                rc5WordSize = Integer.parseInt(wordSizeStr);
+            }
+            
+            String roundsStr = rc5RoundsField.getText();
+            if (roundsStr != null && !roundsStr.isEmpty()) {
+                try {
+                    rc5Rounds = Integer.parseInt(roundsStr);
+                    if (rc5Rounds < 1 || rc5Rounds > 255) {
+                        statusLabel.setText("RC5 rounds must be between 1 and 255");
+                        statusLabel.setStyle("-fx-text-fill: red;");
+                        return;
+                    }
+                } catch (NumberFormatException e) {
+                    statusLabel.setText("Invalid RC5 rounds value");
+                    statusLabel.setStyle("-fx-text-fill: red;");
+                    return;
+                }
+            } else {
+                statusLabel.setText("Please enter RC5 rounds");
+                statusLabel.setStyle("-fx-text-fill: red;");
+                return;
+            }
+        }
+
         statusLabel.setText("Creating chat...");
         statusLabel.setStyle("-fx-text-fill: blue;");
 
-        apiClient.createChat(selectedContact.getId(), algorithm, mode, padding)
+        apiClient.createChat(selectedContact.getId(), algorithm, mode, padding, rc5WordSize, rc5Rounds)
                 .thenAccept(chat -> {
                     Platform.runLater(() -> {
                         statusLabel.setText("Chat created successfully!");

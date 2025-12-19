@@ -1,6 +1,5 @@
 package dora.crypto.shared.dto;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -24,6 +23,14 @@ public class ChatRequest {
     @JsonProperty("padding")
     private String padding;
 
+    @Schema(description = "RC5 word size (16, 32, or 64 bits)", example = "32")
+    @JsonProperty("rc5WordSize")
+    private Integer rc5WordSize;
+
+    @Schema(description = "RC5 number of rounds (1-255)", example = "12")
+    @JsonProperty("rc5Rounds")
+    private Integer rc5Rounds;
+
     public ChatRequest() {
     }
 
@@ -32,6 +39,15 @@ public class ChatRequest {
         this.algorithm = algorithm;
         this.mode = mode;
         this.padding = padding;
+    }
+
+    public ChatRequest(Long contactId, String algorithm, String mode, String padding, Integer rc5WordSize, Integer rc5Rounds) {
+        this.contactId = contactId;
+        this.algorithm = algorithm;
+        this.mode = mode;
+        this.padding = padding;
+        this.rc5WordSize = rc5WordSize;
+        this.rc5Rounds = rc5Rounds;
     }
 
     public Long getContactId() {
@@ -64,6 +80,22 @@ public class ChatRequest {
 
     public void setPadding(String padding) {
         this.padding = padding;
+    }
+
+    public Integer getRc5WordSize() {
+        return rc5WordSize;
+    }
+
+    public void setRc5WordSize(Integer rc5WordSize) {
+        this.rc5WordSize = rc5WordSize;
+    }
+
+    public Integer getRc5Rounds() {
+        return rc5Rounds;
+    }
+
+    public void setRc5Rounds(Integer rc5Rounds) {
+        this.rc5Rounds = rc5Rounds;
     }
 }
 

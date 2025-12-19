@@ -59,6 +59,8 @@ public class ChatService {
                 .algorithm(request.getAlgorithm())
                 .mode(request.getMode())
                 .padding(request.getPadding())
+                .rc5WordSize(request.getRc5WordSize())
+                .rc5Rounds(request.getRc5Rounds())
                 .status(dora.server.chat.Chat.ChatStatus.CREATED)
                 .build();
 

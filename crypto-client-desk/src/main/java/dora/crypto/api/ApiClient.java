@@ -277,8 +277,12 @@ public class ApiClient {
     }
 
     public CompletableFuture<Chat> createChat(Long contactId, String algorithm, String mode, String padding) {
+        return createChat(contactId, algorithm, mode, padding, null, null);
+    }
+
+    public CompletableFuture<Chat> createChat(Long contactId, String algorithm, String mode, String padding, Integer rc5WordSize, Integer rc5Rounds) {
         try {
-            ChatRequest request = new ChatRequest(contactId, algorithm, mode, padding);
+            ChatRequest request = new ChatRequest(contactId, algorithm, mode, padding, rc5WordSize, rc5Rounds);
             String jsonBody = objectMapper.writeValueAsString(request);
 
             HttpRequest httpRequest = createRequestBuilder("/chats")
