@@ -39,12 +39,10 @@ public class ChatService {
             throw new IllegalArgumentException("Contact must be confirmed to create a chat");
         }
 
-        // Determine the other user
         User otherUser = contact.getUser().getUsername().equals(currentUser.getUsername())
                 ? contact.getContactUser()
                 : contact.getUser();
 
-        // Check if chat already exists
         Optional<dora.server.chat.Chat> existingChat = chatRepository.findByUser1AndUser2(currentUser, otherUser);
         if (existingChat.isEmpty()) {
             existingChat = chatRepository.findByUser2AndUser1(currentUser, otherUser);
@@ -97,7 +95,6 @@ public class ChatService {
             throw new IllegalArgumentException("You can only connect to your own chats");
         }
 
-        // Check if already connected
         boolean alreadyConnected = (chat.getUser1().getUsername().equals(currentUser.getUsername()) && chat.isConnectedUser1()) ||
                                    (chat.getUser2().getUsername().equals(currentUser.getUsername()) && chat.isConnectedUser2());
 
@@ -105,14 +102,12 @@ public class ChatService {
             throw new IllegalArgumentException("Dont connect twice to one chat");
         }
 
-        // Mark the current user as connected
         if (chat.getUser1().getUsername().equals(currentUser.getUsername())) {
             chat.setConnectedUser1(true);
         } else {
             chat.setConnectedUser2(true);
         }
 
-        // Update status based on how many users are connected
         int connectedCount = (chat.isConnectedUser1() ? 1 : 0) + (chat.isConnectedUser2() ? 1 : 0);
         var oldStatus = chat.getStatus();
         dora.server.chat.Chat.ChatStatus newStatus;
@@ -131,12 +126,10 @@ public class ChatService {
 
         chatRepository.save(chat);
 
-        // Determine the other user
         User otherUser = chat.getUser1().getUsername().equals(currentUser.getUsername())
                 ? chat.getUser2()
                 : chat.getUser1();
 
-        // If status becomes CONNECTED1, send system message to the connected user
         if (newStatus == dora.server.chat.Chat.ChatStatus.CONNECTED1) {
             System.out.println("Chat reached CONNECTED1, sending system message to waiting user");
             var systemMessage = ChatMessage.builder()
@@ -148,12 +141,9 @@ public class ChatService {
             sendMessage(chat.getId(), systemMessage);
         }
 
-        // If status becomes CONNECTED2, send messages to both users
-        // Only send "ready for key exchange" when status TRANSITIONS to CONNECTED2, not when it's already CONNECTED2
         if (newStatus == dora.server.chat.Chat.ChatStatus.CONNECTED2) {
             System.out.println("Chat reached CONNECTED2, sending system messages and 'ready for key exchange' messages to both users");
 
-            // Send system message to the other user (who was waiting) to inform them the other user has joined
             var systemMessageToOther = ChatMessage.builder()
                     .receiver(otherUser.getUsername())
                     .sender("System")
@@ -162,7 +152,6 @@ public class ChatService {
                     .build();
             sendMessage(chat.getId(), systemMessageToOther);
 
-            // Send system message to the current user (who just joined) to inform them they can start messaging
             var systemMessageToCurrent = ChatMessage.builder()
                     .receiver(currentUser.getUsername())
                     .sender("System")
@@ -171,7 +160,6 @@ public class ChatService {
                     .build();
             sendMessage(chat.getId(), systemMessageToCurrent);
 
-            // Send "ready for key exchange" message to the other user
             var messageToOther = ChatMessage.builder()
                     .receiver(otherUser.getUsername())
                     .sender(currentUser.getUsername())
@@ -179,7 +167,6 @@ public class ChatService {
                     .build();
             sendMessage(chat.getId(), messageToOther);
 
-            // Also send "ready for key exchange" message to current user (they should receive it when subscribed)
             var messageToCurrent = ChatMessage.builder()
                     .receiver(currentUser.getUsername())
                     .sender(otherUser.getUsername())
@@ -222,7 +209,6 @@ public class ChatService {
             throw new IllegalArgumentException("You can only disconnect from your own chats");
         }
 
-        // Check if the user is actually connected
         boolean isUser1 = chat.getUser1().getUsername().equals(currentUser.getUsername());
         boolean isUser2 = chat.getUser2().getUsername().equals(currentUser.getUsername());
 
@@ -232,14 +218,12 @@ public class ChatService {
             throw new IllegalArgumentException("You are not connected to this chat");
         }
 
-        // Mark the current user as disconnected
         if (isUser1) {
             chat.setConnectedUser1(false);
         } else if (isUser2) {
             chat.setConnectedUser2(false);
         }
 
-        // Update status based on how many users are still connected
         int connectedCount = (chat.isConnectedUser1() ? 1 : 0) + (chat.isConnectedUser2() ? 1 : 0);
         dora.server.chat.Chat.ChatStatus newStatus;
         if (connectedCount == 0) {
@@ -258,7 +242,6 @@ public class ChatService {
 
         chatRepository.save(chat);
 
-        // If there's still one user connected, send system message to inform them
         if (connectedCount == 1) {
             User remainingUser = chat.isConnectedUser1() ? chat.getUser1() : chat.getUser2();
             System.out.println("User disconnected, sending system message to remaining user: " + remainingUser.getUsername());
@@ -278,21 +261,17 @@ public class ChatService {
         dora.server.chat.Chat chat = chatRepository.findById(chatId)
                 .orElseThrow(() -> new IllegalArgumentException("Chat not found"));
 
-        // Verify that the current user is part of this chat
         if (!chat.getUser1().getUsername().equals(currentUser.getUsername()) &&
                 !chat.getUser2().getUsername().equals(currentUser.getUsername())) {
             throw new IllegalArgumentException("You can only delete your own chats");
         }
 
-        // Disconnect all users from the chat before deleting
         User user1 = chat.getUser1();
         User user2 = chat.getUser2();
 
-        // Check connection status before disconnecting
         boolean user1WasConnected = chat.isConnectedUser1();
         boolean user2WasConnected = chat.isConnectedUser2();
 
-        // Send "chat deleted" notification to all connected users first
         if (user1WasConnected) {
             var messageToUser1 = ChatMessage.builder()
                     .receiver(user1.getUsername())
@@ -313,19 +292,11 @@ public class ChatService {
             sendMessage(chatId, messageToUser2);
         }
 
-        // Always disconnect all users before deletion, regardless of current connection state
-        // This ensures both users are marked as disconnected in the database
-        // Set both connection flags to false to disconnect both users
         chat.setConnectedUser1(false);
         chat.setConnectedUser2(false);
-
-        // Update status to CREATED (no users connected)
         chat.setStatus(dora.server.chat.Chat.ChatStatus.CREATED);
-
-        // Save the updated state - this persists the disconnect for both users
         chat = chatRepository.save(chat);
 
-        // Verify both users are now disconnected
         if (chat.isConnectedUser1() || chat.isConnectedUser2()) {
             throw new IllegalStateException("Failed to disconnect all users from chat " + chatId +
                                          " - user1: " + chat.isConnectedUser1() +
@@ -338,7 +309,6 @@ public class ChatService {
                          ", user1 now connected: " + chat.isConnectedUser1() +
                          ", user2 now connected: " + chat.isConnectedUser2() + ")");
 
-        // Delete the chat
         chatRepository.delete(chat);
         System.out.println("Chat " + chatId + " deleted successfully");
     }

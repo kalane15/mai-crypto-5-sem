@@ -29,7 +29,6 @@ public class Main extends Application {
         this.primaryStage = stage;
         this.apiClient = new ApiClient();
 
-        // Set up callback for when token becomes invalid
         apiClient.setOnTokenInvalid(message -> {
             Platform.runLater(() -> {
                 System.out.println("Token invalid: " + message);
@@ -37,14 +36,11 @@ public class Main extends Application {
             });
         });
 
-        // Create views
         authView = new AuthView(apiClient, this::onAuthSuccess, this);
         mainView = new MainView(apiClient, this);
 
-        // Set up logout handler
         mainView.addEventHandler(MainView.LOGOUT_EVENT, e -> showAuthView());
 
-        // Show initial auth view
         showAuthView();
 
         stage.setTitle("Crypto Chat Client");
@@ -84,11 +80,9 @@ public class Main extends Application {
     }
 
     private void showAuthView() {
-        // Reuse the existing authViewScene instead of creating a new one
         if (authViewScene != null) {
             primaryStage.setScene(authViewScene);
         } else {
-            // Create scene if it doesn't exist (first time)
             authViewScene = new Scene(authView, 600, 500);
             primaryStage.setScene(authViewScene);
         }
@@ -97,11 +91,9 @@ public class Main extends Application {
     private void onAuthSuccess(String username) {
         Platform.runLater(() -> {
             mainView.setCurrentUser(username);
-            // Reuse the existing mainViewScene instead of creating a new one
             if (mainViewScene != null) {
                 primaryStage.setScene(mainViewScene);
             } else {
-                // Create scene if it doesn't exist (first time)
                 mainViewScene = new Scene(mainView, 900, 700);
                 primaryStage.setScene(mainViewScene);
             }
@@ -109,11 +101,8 @@ public class Main extends Application {
     }
 
     public boolean manageConnectToChat(Chat chat) {
-        // Create new socket
         socket = new ChatWebSocketClient("ws:" + ApiClient.BASE_URL_NO_PROTOCOL, chat, UserName);
         
-        // Set up callback to call connectToChat after subscription is ready
-        // This ensures we're subscribed before the server sends "ready for key exchange"
         socket.setOnSubscriptionReady(() -> {
             System.out.println("Subscription ready, calling connectToChat for chat " + chat.getId());
             apiClient.connectToChat(chat.getId());
@@ -124,7 +113,6 @@ public class Main extends Application {
     }
 
     public void manageDisconnect() {
-        // Destroy socket if it exists
         if (socket != null) {
             System.out.println("Disconnecting and destroying socket");
             socket.disconnect();
@@ -143,11 +131,9 @@ public class Main extends Application {
     public void showMainView() {
         Platform.runLater(() -> {
             currentChatView = null;
-            // Reuse the existing mainViewScene instead of creating a new one
             if (mainViewScene != null) {
                 primaryStage.setScene(mainViewScene);
             } else {
-                // Fallback: create scene if it doesn't exist (shouldn't happen normally)
                 mainViewScene = new Scene(mainView, 900, 700);
                 primaryStage.setScene(mainViewScene);
             }

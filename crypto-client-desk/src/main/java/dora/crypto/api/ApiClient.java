@@ -29,8 +29,8 @@ public class ApiClient {
     
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private String authToken; // Token stored only in RAM
-    private Consumer<String> onTokenInvalidCallback; // Callback when token is invalid
+    private String authToken;
+    private Consumer<String> onTokenInvalidCallback;
 
     public ApiClient() {
         this.httpClient = HttpClient.newBuilder()
@@ -92,7 +92,6 @@ public class ApiClient {
             System.err.println("Received " + statusCode + " - clearing invalid token");
             clearAuthToken();
             
-            // Notify callback if set
             if (onTokenInvalidCallback != null) {
                 String message = errorMessage != null ? errorMessage : 
                     (statusCode == 401 ? "Unauthorized - please sign in again" : "Forbidden - please sign in again");
@@ -165,7 +164,6 @@ public class ApiClient {
         }
     }
 
-    // Contacts
     public CompletableFuture<Void> addContact(String username) {
         try {
             ContactRequest request = new ContactRequest(username);
@@ -178,7 +176,6 @@ public class ApiClient {
 
             return httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString())
                     .thenApply(response -> {
-                        // Only handle unauthorized for 401/403, not for 400 (bad request)
                         if (response.statusCode() == 401 || response.statusCode() == 403) {
                             if (handleUnauthorized(response.statusCode(), response.body())) {
                                 throw new RuntimeException("Unauthorized - please sign in again");
@@ -187,7 +184,6 @@ public class ApiClient {
                         if (response.statusCode() >= 200 && response.statusCode() < 300) {
                             return null;
                         } else {
-                            // Extract user-friendly error message from response
                             String errorMessage = extractErrorMessage(response.body());
                             if (errorMessage != null && !errorMessage.isEmpty()) {
                                 throw new RuntimeException(errorMessage);
